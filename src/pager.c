@@ -413,7 +413,14 @@ static void search_prompt(rip_state_t *state, int forward) {
                 printf("\033[%d;%dH\033[K", state->term_rows, len + 2);
                 fflush(stdout);
             }
-        } else if (key == '\033' || key == KEY_RESIZE) {
+        } else if (key == '\033') {
+            len = 0;
+            break;
+        } else if (key == KEY_RESIZE) {
+            printf("\033[2J");
+            rip_get_terminal_size(state);
+            rip_reflow_all(state);
+            clamp_top(state);
             len = 0;
             break;
         } else if (key >= 32 && key < 127 && len < 255) {
@@ -448,7 +455,13 @@ static void filter_prompt(rip_state_t *state) {
                 printf("\033[%d;%dH\033[K", state->term_rows, len + 2);
                 fflush(stdout);
             }
-        } else if (key == '\033' || key == KEY_RESIZE) {
+        } else if (key == '\033') {
+            return;
+        } else if (key == KEY_RESIZE) {
+            printf("\033[2J");
+            rip_get_terminal_size(state);
+            rip_reflow_all(state);
+            clamp_top(state);
             return;
         } else if (key >= 32 && key < 127 && len < 255) {
             buf[len++] = (char)key;
@@ -582,6 +595,7 @@ static void open_in_editor(rip_state_t *state) {
     }
 
     rip_enable_raw_mode(state);
+    printf("\033[2J"); /* Clear editor screen remnants */
     rip_get_terminal_size(state);
     rip_reload(state);
 
@@ -607,6 +621,13 @@ static void shell_command_prompt(rip_state_t *state) {
                 fflush(stdout);
             }
         } else if (key == '\033') {
+            len = 0;
+            break;
+        } else if (key == KEY_RESIZE) {
+            printf("\033[2J");
+            rip_get_terminal_size(state);
+            rip_reflow_all(state);
+            clamp_top(state);
             len = 0;
             break;
         } else if (key >= 32 && key < 127 && len < 511) {
@@ -636,6 +657,7 @@ static void shell_command_prompt(rip_state_t *state) {
         }
 
         rip_enable_raw_mode(state);
+        printf("\033[2J"); /* Clear command output remnants */
         rip_get_terminal_size(state);
         rip_reflow_all(state);
     }
@@ -732,6 +754,7 @@ void rip_run(rip_state_t *state) {
         int ret = poll(fds, nfds, -1);
         if (ret < 0) {
             if (errno == EINTR) {
+                printf("\033[2J");
                 rip_get_terminal_size(state);
                 rip_reflow_all(state);
                 rip_update_search_matches(state);
@@ -765,6 +788,7 @@ void rip_run(rip_state_t *state) {
             int key = rip_read_key(state);
             if (key == -1) break;
             if (key == KEY_RESIZE) {
+                printf("\033[2J");
                 rip_get_terminal_size(state);
                 rip_reflow_all(state);
                 clamp_top(state);
@@ -806,6 +830,7 @@ void rip_run(rip_state_t *state) {
 
             /* ── repaint ── */
             case 'r': case '\f': /* ^L */
+                printf("\033[2J");
                 break; /* just fall through to re-render */
 
             /* ── reload ── */
@@ -991,10 +1016,12 @@ void rip_run(rip_state_t *state) {
             /* ── help ── */
             case 'h': case 'H' & 0x1f: /* also handle if not highlight toggle */
                 show_help(state);
+                printf("\033[2J");
                 break;
 
             /* ── terminal resize ── */
             case KEY_RESIZE:
+                printf("\033[2J");
                 rip_get_terminal_size(state);
                 rip_reflow_all(state);
                 clamp_top(state);
