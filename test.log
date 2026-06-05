@@ -1,0 +1,4 @@
+2026-06-05 15:00:00 [INFO] System initialized.
+2026-06-05 15:00:05 [DEBUG] Reading configuration file.
+2026-06-05 15:00:10 [WARN] High memory usage detected: 85%.
+2026-06-05 15:00:15 [ERROR] Failed to load module 'plugins'. Connection timeout.

@@ -1,0 +1,4 @@
+# Compiles files
+rip
+*.o
+src/*.o
