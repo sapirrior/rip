@@ -1,4 +1,17 @@
-# Compiles files
+# Compiled Binaries & Object Files
 rip
 *.o
 src/*.o
+
+# Development & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+
+# Temporary & Log files
+*.log
