@@ -26,6 +26,7 @@ void rip_init_state(rip_state_t *state) {
     state->tty_fd                = -1;
     state->raw_mode_enabled      = 0;
     state->search_pattern[0]     = '\0';
+    state->filter_pattern[0]     = '\0';
     state->search_dir            = 1;
     state->search_case_insensitive = 1; /* rip default: case-insensitive */
     state->search_highlight      = 1;
@@ -84,7 +85,7 @@ void rip_add_raw_line(rip_state_t *state, const char *data, size_t len) {
     state->num_raw_lines++;
 }
 
-void rip_add_display_line(rip_state_t *state, const char *data, size_t len) {
+void rip_add_display_line(rip_state_t *state, const char *data, size_t len, size_t raw_line_idx) {
     if (state->num_display_lines >= state->display_lines_capacity) {
         state->display_lines_capacity = state->display_lines_capacity
                                         ? state->display_lines_capacity * 2 : 128;
@@ -95,13 +96,14 @@ void rip_add_display_line(rip_state_t *state, const char *data, size_t len) {
     memcpy(state->display_lines[state->num_display_lines].data, data, len);
     state->display_lines[state->num_display_lines].data[len] = '\0';
     state->display_lines[state->num_display_lines].len = len;
+    state->display_lines[state->num_display_lines].raw_line_idx = raw_line_idx;
     state->num_display_lines++;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── *
  *  Word-wrap (preserves leading indent)                                       *
  * ─────────────────────────────────────────────────────────────────────────── */
-static void wrap_line(rip_state_t *state, const char *line, size_t len, int width, size_t raw_offset) {
+static void wrap_line(rip_state_t *state, const char *line, size_t len, int width, size_t raw_offset, size_t raw_line_idx) {
     if (width <= 0) width = 80;
 
     /* Measure indent: count bytes and columns of leading whitespace */
@@ -159,14 +161,14 @@ static void wrap_line(rip_state_t *state, const char *line, size_t len, int widt
         if (scan_byte >= len) {
             size_t segment_len = len - byte_off;
             if (first_line) {
-                rip_add_display_line(state, line + byte_off, segment_len);
+                rip_add_display_line(state, line + byte_off, segment_len, raw_line_idx);
                 state->display_lines[state->num_display_lines - 1].byte_offset = raw_offset + byte_off;
             } else {
                 char *buf = malloc(indent_bytes + segment_len + 1);
                 memcpy(buf, indent_str, indent_bytes);
                 memcpy(buf + indent_bytes, line + byte_off, segment_len);
                 buf[indent_bytes + segment_len] = '\0';
-                rip_add_display_line(state, buf, indent_bytes + segment_len);
+                rip_add_display_line(state, buf, indent_bytes + segment_len, raw_line_idx);
                 state->display_lines[state->num_display_lines - 1].byte_offset = raw_offset + byte_off;
                 free(buf);
             }
@@ -189,7 +191,7 @@ static void wrap_line(rip_state_t *state, const char *line, size_t len, int widt
 
         size_t segment_len = split_byte - byte_off;
         if (first_line) {
-            rip_add_display_line(state, line + byte_off, segment_len);
+            rip_add_display_line(state, line + byte_off, segment_len, raw_line_idx);
             state->display_lines[state->num_display_lines - 1].byte_offset = raw_offset + byte_off;
             first_line = 0;
         } else {
@@ -197,7 +199,7 @@ static void wrap_line(rip_state_t *state, const char *line, size_t len, int widt
             memcpy(buf, indent_str, indent_bytes);
             memcpy(buf + indent_bytes, line + byte_off, segment_len);
             buf[indent_bytes + segment_len] = '\0';
-            rip_add_display_line(state, buf, indent_bytes + segment_len);
+            rip_add_display_line(state, buf, indent_bytes + segment_len, raw_line_idx);
             state->display_lines[state->num_display_lines - 1].byte_offset = raw_offset + byte_off;
             free(buf);
         }
@@ -232,15 +234,32 @@ void rip_reflow_all(rip_state_t *state) {
     int wrap_width = state->term_cols - ln_width;
     if (wrap_width < 1) wrap_width = 1;
 
+    regex_t filter_re;
+    int has_filter = 0;
+    if (state->filter_pattern[0]) {
+        int flags = REG_EXTENDED | (state->search_case_insensitive ? REG_ICASE : 0);
+        has_filter = (regcomp(&filter_re, state->filter_pattern, flags) == 0);
+    }
+
     for (size_t i = 0; i < state->num_raw_lines; i++) {
         rip_line_t *r = &state->raw_lines[i];
+        if (has_filter) {
+            if (regexec(&filter_re, r->data, 0, NULL, 0) != 0) {
+                continue;
+            }
+        }
         if (state->wrap_enabled) {
-            wrap_line(state, r->data, r->len, wrap_width, r->byte_offset);
+            wrap_line(state, r->data, r->len, wrap_width, r->byte_offset, i);
         } else {
-            rip_add_display_line(state, r->data, r->len);
+            rip_add_display_line(state, r->data, r->len, i);
             state->display_lines[state->num_display_lines - 1].byte_offset = r->byte_offset;
         }
     }
+
+    if (has_filter) {
+        regfree(&filter_re);
+    }
+
     rip_update_search_matches(state);
 }
 

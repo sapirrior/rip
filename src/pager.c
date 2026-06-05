@@ -97,6 +97,7 @@ static void render_status(rip_state_t *state) {
             if (state->line_numbers)          strcat(tmp, "#");
             if (!state->search_highlight)     strcat(tmp, "H");
             if (state->follow_mode)           strcat(tmp, "F");
+            if (state->filter_pattern[0])     strcat(tmp, "&");
             strcat(tmp, "]");
             if (strcmp(tmp, "[]") != 0) strcpy(flags, tmp);
         }
@@ -107,6 +108,10 @@ static void render_status(rip_state_t *state) {
 
         if (bot >= state->num_display_lines && state->num_display_lines > 0) {
             printf(" (END)");
+        }
+
+        if (state->filter_pattern[0]) {
+            printf("  [Filter: %s]", state->filter_pattern);
         }
 
         if (state->num_search_matches > 0) {
@@ -122,6 +127,10 @@ static void render_status(rip_state_t *state) {
         }
     } else {
         /* Short prompt mode: : or (END) */
+        if (state->filter_pattern[0]) {
+            printf("[Filter: %s] ", state->filter_pattern);
+        }
+
         if (state->num_search_matches > 0) {
             printf("[Match %d/%zu] ", state->current_match_idx + 1, state->num_search_matches);
         }
@@ -286,8 +295,13 @@ void rip_render(rip_state_t *state) {
             size_t raw_len  = state->display_lines[idx].len;
 
             /* Line numbers */
-            if (state->line_numbers)
-                printf("\033[90m%*zu│\033[0m", ln_width - 1, idx + 1);
+            if (state->line_numbers) {
+                if (idx > 0 && state->display_lines[idx].raw_line_idx == state->display_lines[idx - 1].raw_line_idx) {
+                    printf("\033[90m%*s│\033[0m", ln_width - 1, "");
+                } else {
+                    printf("\033[90m%*zu│\033[0m", ln_width - 1, state->display_lines[idx].raw_line_idx + 1);
+                }
+            }
 
             int horiz = state->wrap_enabled ? 0 : state->horiz_offset;
             int continues = 0;
@@ -418,6 +432,44 @@ static void search_prompt(rip_state_t *state, int forward) {
     }
 }
 
+static void filter_prompt(rip_state_t *state) {
+    char buf[256] = {0};
+    int  len = 0;
+
+    printf("\033[%d;1H\033[K&", state->term_rows);
+    fflush(stdout);
+
+    while (1) {
+        int key = rip_read_key(state);
+        if (key == '\n' || key == '\r') break;
+        if (key == 127 || key == '\b') {
+            if (len > 0) {
+                buf[--len] = '\0';
+                printf("\033[%d;%dH\033[K", state->term_rows, len + 2);
+                fflush(stdout);
+            }
+        } else if (key == '\033' || key == KEY_RESIZE) {
+            return;
+        } else if (key >= 32 && key < 127 && len < 255) {
+            buf[len++] = (char)key;
+            buf[len]   = '\0';
+            putchar(key);
+            fflush(stdout);
+        }
+    }
+
+    /* Update filter pattern and reflow */
+    memcpy(state->filter_pattern, buf, len + 1);
+    rip_reflow_all(state);
+    state->top_line = 0;
+    clamp_top(state);
+    if (state->filter_pattern[0]) {
+        snprintf(state->status_msg, sizeof(state->status_msg), "Filter active: %s", state->filter_pattern);
+    } else {
+        snprintf(state->status_msg, sizeof(state->status_msg), "Filter cleared.");
+    }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────── *
  *  Help screen                                                                *
  * ─────────────────────────────────────────────────────────────────────────── */
@@ -438,9 +490,10 @@ static void show_help(rip_state_t *state) {
     printf("  ← / →            Scroll 4 columns left/right\n");
     printf("  ( / )            Scroll half-page left/right\n\n");
 
-    printf("\033[1mSEARCH\033[0m\n");
+    printf("\033[1mSEARCH / FILTER\033[0m\n");
     printf("  /pattern         Search forward (prefix N repeats)\n");
     printf("  ?pattern         Search backward (prefix N repeats)\n");
+    printf("  &pattern         Filter lines by regex pattern (Enter to clear)\n");
     printf("  n                Next match (prefix N repeats)\n");
     printf("  N                Previous match (prefix N repeats)\n");
     printf("  i                Toggle case-insensitive\n");
@@ -830,12 +883,15 @@ void rip_run(rip_state_t *state) {
                 }
                 break;
 
-            /* ── search ── */
+            /* ── search / filter ── */
             case '/':
                 search_prompt(state, 1);
                 break;
             case '?':
                 search_prompt(state, 0);
+                break;
+            case '&':
+                filter_prompt(state);
                 break;
             case 'n':
                 do_search(state, state->search_dir == 1, N);
@@ -844,11 +900,13 @@ void rip_run(rip_state_t *state) {
                 do_search(state, state->search_dir != 1, N);
                 break;
 
-            /* ── Escape clears search pattern ── */
+            /* ── Escape clears search/filter pattern ── */
             case '\033':
                 state->search_pattern[0] = '\0';
+                state->filter_pattern[0] = '\0';
+                rip_reflow_all(state);
                 rip_update_search_matches(state);
-                snprintf(state->status_msg, sizeof(state->status_msg), "Search pattern cleared.");
+                snprintf(state->status_msg, sizeof(state->status_msg), "Search and filter patterns cleared.");
                 break;
 
             /* ── edit current file ── */

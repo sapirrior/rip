@@ -20,6 +20,7 @@ typedef struct {
     char *data;
     size_t len;
     size_t byte_offset;
+    size_t raw_line_idx;
 } rip_line_t;
 
 typedef struct {
@@ -43,8 +44,9 @@ typedef struct {
     struct termios orig_termios;
     int raw_mode_enabled;
 
-    /* ── Search ── */
+    /* ── Search / Filter ── */
     char search_pattern[256];
+    char filter_pattern[256];
     int search_dir;         /* 1 = forward, -1 = backward                   */
     int search_case_insensitive; /* 1 = ignore case (default)               */
     int search_highlight;   /* 1 = highlight on (default)                   */
@@ -91,7 +93,7 @@ void rip_update_search_matches(rip_state_t *state);
 
 /* Reflow */
 void rip_reflow_all(rip_state_t *state);
-void rip_add_display_line(rip_state_t *state, const char *data, size_t len);
+void rip_add_display_line(rip_state_t *state, const char *data, size_t len, size_t raw_line_idx);
 int  rip_get_gutter_width(rip_state_t *state);
 
 /* Terminal */
