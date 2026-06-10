@@ -106,7 +106,22 @@ char* ast_highlight_stream(ast_node_t *head, size_t *out_len) {
                 append_str(&dest, &di, &cap, esc);
             }
             for (size_t i = 0; i < curr->len; i++) {
-                append_char(&dest, &di, &cap, curr->start[i]);
+                char c = curr->start[i];
+                if (c == '\n' || c == '\r') {
+                    if (esc) {
+                        append_str(&dest, &di, &cap, "\033[0m");
+                    }
+                    append_char(&dest, &di, &cap, c);
+                    if (c == '\r' && i + 1 < curr->len && curr->start[i+1] == '\n') {
+                        append_char(&dest, &di, &cap, '\n');
+                        i++;
+                    }
+                    if (esc) {
+                        append_str(&dest, &di, &cap, esc);
+                    }
+                } else {
+                    append_char(&dest, &di, &cap, c);
+                }
             }
             if (esc) {
                 append_str(&dest, &di, &cap, "\033[0m");
