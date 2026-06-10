@@ -27,7 +27,10 @@ static void handle_cleanup_signals(int sig) {
 
 static void print_help_cli(const char *prog) {
     printf("some — Scroll Or More Easily (less++)\n\n");
-    printf("Usage: %s [file]  or  command | %s\n\n", prog, prog);
+    printf("Usage: %s [options] [file]  or  command | %s\n\n", prog, prog);
+    printf("Options:\n");
+    printf("  -v, --version    Show version information\n");
+    printf("  -h, --help       Show this help message\n\n");
     printf("Navigation:\n");
     printf("  j/↓/Enter        Scroll down 1 line (prefix N repeats)\n");
     printf("  k/↑              Scroll up 1 line (prefix N repeats)\n");

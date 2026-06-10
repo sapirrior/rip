@@ -39,9 +39,15 @@ make clean && make
 
 ## Usage
 
-Simply run `some` by passing a file path or piping output to it:
+Simply run `some` by passing options, a file path, or piping output to it:
 
 ```bash
+# Check version information
+./some -v
+
+# Show command-line help
+./some -h
+
 # View code with syntax highlighting
 ./some test_code.c
 
