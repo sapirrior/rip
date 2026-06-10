@@ -254,7 +254,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
     return head;
 }
 
-char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len) {
+char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len, int enable_colors) {
     if (!filename) return NULL;
 
     const syntax_def_t* def = NULL;
@@ -281,6 +281,24 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
             def = get_xml_syntax_def();
         } else {
             def = get_txt_syntax_def();
+        }
+    }
+
+    if (!enable_colors) {
+        char *formatted_src = NULL;
+        size_t formatted_len = input_len;
+        if (def->format_fn) {
+            formatted_src = def->format_fn(input, input_len, &formatted_len);
+        }
+        if (formatted_src) {
+            *out_len = formatted_len;
+            return formatted_src;
+        } else {
+            char *copy = malloc(input_len + 1);
+            memcpy(copy, input, input_len);
+            copy[input_len] = '\0';
+            *out_len = input_len;
+            return copy;
         }
     }
 

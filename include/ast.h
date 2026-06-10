@@ -44,7 +44,7 @@ typedef struct {
     ast_node_t* (*parse_fn)(const char *input, size_t input_len);
 } syntax_def_t;
 
-char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len);
+char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len, int enable_colors);
 
 // Node helpers
 ast_node_t* ast_create_node(ast_node_type_t type, const char *start, size_t len);

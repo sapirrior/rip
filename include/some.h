@@ -60,6 +60,7 @@ typedef struct {
     int line_numbers;       /* 1 = show line numbers                        */
     int follow_mode;        /* 1 = tail-f mode active                       */
     int verbose_prompt;     /* 1 = verbose status bar, 0 = short prompt     */
+    int syntax_highlighting; /* 1 = syntax highlighting ON, 0 = OFF          */
 
     /* ── Status message (temporary overlay) ── */
     char status_msg[512];   /* if non-empty, show this instead of normal bar*/

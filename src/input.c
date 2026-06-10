@@ -53,6 +53,7 @@ void some_init_state(some_state_t *state) {
 
     state->search_history_count  = 0;
     state->filter_history_count  = 0;
+    state->syntax_highlighting   = 1;
 }
 
 void some_free_state(some_state_t *state) {
@@ -358,7 +359,7 @@ static int load_from_fp(some_state_t *state, FILE *fp) {
     state->file_size = len;
 
     size_t out_len = len;
-    char *converted = ast_convert(state->filename, buf, len, &out_len);
+    char *converted = ast_convert(state->filename, buf, len, &out_len, state->syntax_highlighting);
     const char *src  = converted ? converted : buf;
     size_t src_len   = converted ? out_len   : len;
 

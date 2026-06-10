@@ -97,6 +97,7 @@ static void render_status(some_state_t *state) {
             if (state->line_numbers)          strcat(tmp, "#");
             if (!state->search_highlight)     strcat(tmp, "H");
             if (state->follow_mode)           strcat(tmp, "F");
+            if (!state->syntax_highlighting)  strcat(tmp, "S");
             if (state->filter_pattern[0])     strcat(tmp, "&");
             strcat(tmp, "]");
             if (strcmp(tmp, "[]") != 0) strcpy(flags, tmp);
@@ -709,6 +710,7 @@ static void show_help(some_state_t *state) {
         "DISPLAY",
         "  w                Toggle word wrap / chop",
         "  L                Toggle line numbers",
+        "  s                Toggle syntax highlighting",
         "  M                Toggle verbose status bar",
         "  =                Show detailed file info",
         "  r / ^L           Repaint screen",
@@ -721,7 +723,7 @@ static void show_help(some_state_t *state) {
         "  Ctrl+H           This help screen",
         "  q / Q            Quit / Return",
         "",
-        "Status bar flags:  [W] wrap  [I] icase  [#] line-nums  [H] highlights off  [F] follow",
+        "Status bar flags:  [W] wrap  [I] icase  [#] line-nums  [H] highlights off  [F] follow  [S] syntax off",
     };
 
     size_t num_lines = sizeof(help_lines) / sizeof(help_lines[0]);
@@ -1177,7 +1179,19 @@ void some_run(some_state_t *state) {
                          state->search_highlight ? "ON" : "OFF");
                 break;
 
-            /* ── display toggles ── */
+             /* ── display toggles ── */
+            case 's': {
+                state->syntax_highlighting ^= 1;
+                if (strcmp(state->filename, "stdin") == 0) {
+                    snprintf(state->status_msg, sizeof(state->status_msg),
+                             "Cannot toggle syntax highlighting on stdin.");
+                } else {
+                    some_reload(state);
+                    snprintf(state->status_msg, sizeof(state->status_msg),
+                             "Syntax highlighting: %s", state->syntax_highlighting ? "ON" : "OFF");
+                }
+                break;
+            }
             case 'w': case 'W': {
                 state->wrap_enabled ^= 1;
                 state->horiz_offset = 0;
