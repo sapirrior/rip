@@ -3,7 +3,38 @@
 #include <string.h>
 #include <ctype.h>
 
+#define AST_POOL_BLOCK_SIZE 4096
+
+typedef struct ast_pool_block {
+    struct ast_pool_block *next;
+    size_t used;
+    ast_node_t nodes[AST_POOL_BLOCK_SIZE];
+} ast_pool_block_t;
+
+static ast_pool_block_t *g_pool_head = NULL;
+static ast_pool_block_t *g_pool_current = NULL;
+static int g_pool_active = 0;
+
 ast_node_t* ast_create_node(ast_node_type_t type, const char *start, size_t len) {
+    if (g_pool_active) {
+        if (!g_pool_current || g_pool_current->used >= AST_POOL_BLOCK_SIZE) {
+            ast_pool_block_t *block = malloc(sizeof(ast_pool_block_t));
+            block->next = NULL;
+            block->used = 0;
+            if (!g_pool_head) {
+                g_pool_head = block;
+            } else {
+                g_pool_current->next = block;
+            }
+            g_pool_current = block;
+        }
+        ast_node_t *node = &g_pool_current->nodes[g_pool_current->used++];
+        node->type = type;
+        node->start = start;
+        node->len = len;
+        node->next = NULL;
+        return node;
+    }
     ast_node_t *node = malloc(sizeof(ast_node_t));
     node->type = type;
     node->start = start;
@@ -13,6 +44,10 @@ ast_node_t* ast_create_node(ast_node_type_t type, const char *start, size_t len)
 }
 
 void ast_free_nodes(ast_node_t *head) {
+    if (g_pool_active) {
+        // Pool will be freed in one go at the end of ast_convert
+        return;
+    }
     while (head) {
         ast_node_t *tmp = head->next;
         free(head);
@@ -94,10 +129,26 @@ static int is_word_in_list(const char *s, size_t len, const char **list, size_t 
     return 0;
 }
 
+static int is_all_caps(const char *s, size_t len) {
+    if (len == 0) return 0;
+    int has_letter = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (isalpha((unsigned char)s[i])) {
+            has_letter = 1;
+            if (islower((unsigned char)s[i])) return 0;
+        } else if (!isdigit((unsigned char)s[i]) && s[i] != '_') {
+            return 0;
+        }
+    }
+    return has_letter;
+}
+
 static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, const syntax_def_t *def) {
     ast_node_t *head = NULL, *tail = NULL;
     size_t i = 0;
+
     int last_was_def_or_class = 0;
+    int last_was_struct_or_union = 0;
 
     while (i < input_len) {
         // 1. Whitespace
@@ -149,10 +200,15 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
         }
 
         // 4. Preprocessor directive (if extension is C-based)
-        if (input[i] == '#' && def->extension && (strcmp(def->extension, ".c") == 0)) {
+        if (input[i] == '#' && def->extension && (strcmp(def->extension, ".c") == 0 || strcmp(def->extension, ".cpp") == 0 || strcmp(def->extension, ".h") == 0 || strcmp(def->extension, ".hpp") == 0)) {
             size_t prep_start = i;
             while (i < input_len && input[i] != '\n' && input[i] != '\r') {
-                i++;
+                if (input[i] == '\\' && i + 1 < input_len && (input[i+1] == '\n' || input[i+1] == '\r')) {
+                    i += 2;
+                    if (i < input_len && input[i-1] == '\r' && input[i] == '\n') i++;
+                } else {
+                    i++;
+                }
             }
             ast_node_t *node = ast_create_node(AST_NODE_PREPROCESSOR, input + prep_start, i - prep_start);
             if (!head) head = node; else tail->next = node;
@@ -160,21 +216,48 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 5. Strings
+        // 5. Python Decorators
+        if (input[i] == '@' && def->extension && strcmp(def->extension, ".py") == 0) {
+            size_t dec_start = i;
+            i++;
+            while (i < input_len && (isalnum((unsigned char)input[i]) || input[i] == '_' || input[i] == '.')) {
+                i++;
+            }
+            ast_node_t *node = ast_create_node(AST_NODE_FUNCTION, input + dec_start, i - dec_start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
+        // 6. Strings (including Python triple quotes)
         if (input[i] == '"' || input[i] == '\'') {
             char quote = input[i];
             size_t str_start = i;
-            // Check for python triple quote
             if (def->extension && strcmp(def->extension, ".py") == 0 && i + 2 < input_len && input[i+1] == quote && input[i+2] == quote) {
                 i += 3;
-                while (i + 2 < input_len && !(input[i] == quote && input[i+1] == quote && input[i+2] == quote)) {
-                    if (input[i] == '\\') i += 2; else i++;
+                while (i + 2 < input_len) {
+                    if (input[i] == quote && input[i+1] == quote && input[i+2] == quote) {
+                        i += 3;
+                        break;
+                    }
+                    if (input[i] == '\\' && i + 1 < input_len) {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
                 }
-                if (i + 2 < input_len) i += 3;
             } else {
                 i++;
                 while (i < input_len && input[i] != quote && input[i] != '\n' && input[i] != '\r') {
-                    if (input[i] == '\\' && i + 1 < input_len) i += 2; else i++;
+                    if (input[i] == '\\' && i + 1 < input_len) {
+                        if (input[i+1] == '\r' && i + 2 < input_len && input[i+2] == '\n') {
+                            i += 3;
+                        } else {
+                            i += 2;
+                        }
+                    } else {
+                        i++;
+                    }
                 }
                 if (i < input_len && input[i] == quote) i++;
             }
@@ -184,11 +267,18 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 6. Numbers
-        if (isdigit((unsigned char)input[i])) {
+        // 7. Numbers (hex, octal, float, etc.)
+        if (isdigit((unsigned char)input[i]) || (input[i] == '.' && i + 1 < input_len && isdigit((unsigned char)input[i+1]))) {
             size_t num_start = i;
-            while (i < input_len && (isalnum((unsigned char)input[i]) || input[i] == '.')) {
-                i++;
+            if (input[i] == '0' && i + 1 < input_len && (input[i+1] == 'x' || input[i+1] == 'X')) {
+                i += 2;
+                while (i < input_len && (isxdigit((unsigned char)input[i]) || input[i] == '.' || input[i] == '_')) {
+                    i++;
+                }
+            } else {
+                while (i < input_len && (isalnum((unsigned char)input[i]) || input[i] == '.' || input[i] == '_')) {
+                    i++;
+                }
             }
             ast_node_t *node = ast_create_node(AST_NODE_NUMBER, input + num_start, i - num_start);
             if (!head) head = node; else tail->next = node;
@@ -196,7 +286,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 7. Identifiers
+        // 8. Identifiers
         if (isalpha((unsigned char)input[i]) || input[i] == '_') {
             size_t id_start = i;
             while (i < input_len && (isalnum((unsigned char)input[i]) || input[i] == '_')) {
@@ -204,38 +294,41 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             }
             size_t id_len = i - id_start;
             ast_node_type_t type = AST_NODE_IDENTIFIER;
-            
+
             if (is_word_in_list(input + id_start, id_len, def->keywords, def->num_keywords)) {
                 type = AST_NODE_KEYWORD;
                 if (strncmp(input + id_start, "def", id_len) == 0 || strncmp(input + id_start, "class", id_len) == 0) {
                     last_was_def_or_class = 1;
-                } else {
-                    last_was_def_or_class = 0;
+                } else if (strncmp(input + id_start, "struct", id_len) == 0 || strncmp(input + id_start, "union", id_len) == 0 || strncmp(input + id_start, "enum", id_len) == 0) {
+                    last_was_struct_or_union = 1;
                 }
             } else if (is_word_in_list(input + id_start, id_len, def->types, def->num_types)) {
                 type = AST_NODE_TYPE;
+            } else if (last_was_def_or_class) {
+                type = AST_NODE_FUNCTION;
                 last_was_def_or_class = 0;
+            } else if (last_was_struct_or_union) {
+                type = AST_NODE_TYPE;
+                last_was_struct_or_union = 0;
+            } else if (is_all_caps(input + id_start, id_len)) {
+                type = AST_NODE_NUMBER; // Map constants to number/constant color scheme
             } else {
-                if (last_was_def_or_class) {
+                size_t next_idx = i;
+                while (next_idx < input_len && isspace((unsigned char)input[next_idx])) {
+                    next_idx++;
+                }
+                if (next_idx < input_len && input[next_idx] == '(') {
                     type = AST_NODE_FUNCTION;
-                    last_was_def_or_class = 0;
-                } else {
-                    size_t next_idx = i;
-                    while (next_idx < input_len && isspace((unsigned char)input[next_idx])) {
-                        next_idx++;
-                    }
-                    if (next_idx < input_len && input[next_idx] == '(') {
-                        type = AST_NODE_FUNCTION;
-                    }
                 }
             }
+
             ast_node_t *node = ast_create_node(type, input + id_start, id_len);
             if (!head) head = node; else tail->next = node;
             tail = node;
             continue;
         }
 
-        // 8. Operators
+        // 9. Operators
         if (strchr("+-*/%=&|^!~<>(){}[];:.,?", input[i])) {
             ast_node_t *node = ast_create_node(AST_NODE_OPERATOR, input + i, 1);
             if (!head) head = node; else tail->next = node;
@@ -244,7 +337,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 9. Catch-all text
+        // 10. Catch-all text
         ast_node_t *node = ast_create_node(AST_NODE_TEXT, input + i, 1);
         if (!head) head = node; else tail->next = node;
         tail = node;
@@ -302,6 +395,8 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
         }
     }
 
+    g_pool_active = 1;
+
     char *formatted_src = NULL;
     size_t formatted_len = input_len;
     if (def->format_fn) {
@@ -322,5 +417,17 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
     ast_free_nodes(ast);
     if (formatted_src) free(formatted_src);
 
+    // Free pool blocks
+    ast_pool_block_t *block = g_pool_head;
+    while (block) {
+        ast_pool_block_t *tmp = block->next;
+        free(block);
+        block = tmp;
+    }
+    g_pool_head = NULL;
+    g_pool_current = NULL;
+    g_pool_active = 0;
+
     return res;
 }
+
