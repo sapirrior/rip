@@ -50,6 +50,9 @@ void some_init_state(some_state_t *state) {
     /* Incremental loading */
     state->stdin_eof             = 1;
     state->raw_last_has_newline  = 1;
+
+    state->search_history_count  = 0;
+    state->filter_history_count  = 0;
 }
 
 void some_free_state(some_state_t *state) {
@@ -141,6 +144,16 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
         size_t last_space_byte = 0;
 
         while (scan_byte < len) {
+            if (line[scan_byte] == '\033' && scan_byte + 1 < len && line[scan_byte + 1] == '[') {
+                scan_byte += 2;
+                while (scan_byte < len && !(line[scan_byte] >= 64 && line[scan_byte] <= 126)) {
+                    scan_byte++;
+                }
+                if (scan_byte < len) {
+                    scan_byte++;
+                }
+                continue;
+            }
             unsigned int ch;
             int clen = some_decode_utf8(line + scan_byte, len - scan_byte, &ch);
             int w = some_char_width(ch, current_cols);
@@ -267,9 +280,20 @@ void some_reflow_all(some_state_t *state) {
         int vis_w = 0;
         size_t off = 0;
         while (off < d->len) {
+            if (d->data[off] == '\033' && off + 1 < d->len && d->data[off + 1] == '[') {
+                off += 2;
+                while (off < d->len && !(d->data[off] >= 64 && d->data[off] <= 126)) {
+                    off++;
+                }
+                if (off < d->len) {
+                    off++;
+                }
+                continue;
+            }
             unsigned int ch;
-            off += some_decode_utf8(d->data + off, d->len - off, &ch);
+            int clen = some_decode_utf8(d->data + off, d->len - off, &ch);
             vis_w += some_char_width(ch, vis_w);
+            off += clen;
         }
         if (vis_w > max_w) {
             max_w = vis_w;

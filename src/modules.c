@@ -213,6 +213,226 @@ static char* align_csv(const char *input, size_t input_len, size_t *out_len, cha
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── *
+ *  XML/HTML Parser / Reformatter                                              *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static char* pretty_print_xml(const char *input, size_t input_len, size_t *out_len) {
+    size_t cap = input_len * 2 + 1024;
+    char *dest = malloc(cap);
+    size_t di = 0;
+    int indent = 0;
+
+    for (size_t si = 0; si < input_len; si++) {
+        if (input[si] == ' ' || input[si] == '\t' || input[si] == '\n' || input[si] == '\r') {
+            continue;
+        }
+
+        if (input[si] == '<') {
+            int is_closing = (si + 1 < input_len && input[si + 1] == '/');
+            int is_inline_self_closing = 0;
+
+            size_t tag_end = si;
+            while (tag_end < input_len && input[tag_end] != '>') {
+                tag_end++;
+            }
+            if (tag_end < input_len && input[tag_end - 1] == '/') {
+                is_inline_self_closing = 1;
+            }
+
+            if (is_closing) {
+                indent -= 2;
+                if (indent < 0) indent = 0;
+            }
+
+            if (di > 0 && dest[di - 1] != '\n') {
+                append_char(&dest, &di, &cap, '\n');
+            }
+            for (int j = 0; j < indent; j++) append_char(&dest, &di, &cap, ' ');
+
+            while (si <= tag_end && si < input_len) {
+                append_char(&dest, &di, &cap, input[si++]);
+            }
+            si--;
+
+            if (!is_closing && !is_inline_self_closing) {
+                indent += 2;
+            }
+            continue;
+        }
+
+        append_char(&dest, &di, &cap, input[si]);
+    }
+    dest[di] = '\0';
+    *out_len = di;
+    return dest;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── *
+ *  Diff / Patch Colorizer                                                     *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static char* colorize_diff(const char *input, size_t input_len, size_t *out_len) {
+    size_t cap = input_len * 2 + 1024;
+    char *dest = malloc(cap);
+    size_t di = 0;
+
+    size_t start = 0;
+    for (size_t si = 0; si <= input_len; si++) {
+        if (si == input_len || input[si] == '\n' || input[si] == '\r') {
+            size_t len = si - start;
+            if (len > 0) {
+                if (input[start] == '+') {
+                    append_str(&dest, &di, &cap, "\033[32m");
+                    for (size_t j = 0; j < len; j++) append_char(&dest, &di, &cap, input[start + j]);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (input[start] == '-') {
+                    append_str(&dest, &di, &cap, "\033[31m");
+                    for (size_t j = 0; j < len; j++) append_char(&dest, &di, &cap, input[start + j]);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (input[start] == '@') {
+                    append_str(&dest, &di, &cap, "\033[36m");
+                    for (size_t j = 0; j < len; j++) append_char(&dest, &di, &cap, input[start + j]);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else {
+                    for (size_t j = 0; j < len; j++) append_char(&dest, &di, &cap, input[start + j]);
+                }
+            }
+            if (si < input_len) {
+                append_char(&dest, &di, &cap, input[si]);
+                if (input[si] == '\r' && si + 1 < input_len && input[si + 1] == '\n') {
+                    append_char(&dest, &di, &cap, '\n');
+                    si++;
+                }
+            }
+            start = si + 1;
+        }
+    }
+    dest[di] = '\0';
+    *out_len = di;
+    return dest;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── *
+ *  Log File Colorizer                                                         *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static char* colorize_logs(const char *input, size_t input_len, size_t *out_len) {
+    size_t cap = input_len * 2 + 1024;
+    char *dest = malloc(cap);
+    size_t di = 0;
+
+    size_t start = 0;
+    for (size_t si = 0; si <= input_len; si++) {
+        if (si == input_len || input[si] == '\n' || input[si] == '\r') {
+            size_t len = si - start;
+            if (len > 0) {
+                char *line_copy = malloc(len + 1);
+                memcpy(line_copy, input + start, len);
+                line_copy[len] = '\0';
+
+                if (strstr(line_copy, "ERROR") || strstr(line_copy, "CRITICAL")) {
+                    append_str(&dest, &di, &cap, "\033[31m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (strstr(line_copy, "WARN") || strstr(line_copy, "WARNING")) {
+                    append_str(&dest, &di, &cap, "\033[33m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (strstr(line_copy, "INFO")) {
+                    append_str(&dest, &di, &cap, "\033[32m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (strstr(line_copy, "DEBUG")) {
+                    append_str(&dest, &di, &cap, "\033[34m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else {
+                    append_str(&dest, &di, &cap, line_copy);
+                }
+                free(line_copy);
+            }
+            if (si < input_len) {
+                append_char(&dest, &di, &cap, input[si]);
+                if (input[si] == '\r' && si + 1 < input_len && input[si + 1] == '\n') {
+                    append_char(&dest, &di, &cap, '\n');
+                    si++;
+                }
+            }
+            start = si + 1;
+        }
+    }
+    dest[di] = '\0';
+    *out_len = di;
+    return dest;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── *
+ *  C / C++ Syntax Colorizer                                                    *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static char* colorize_c_code(const char *input, size_t input_len, size_t *out_len) {
+    size_t cap = input_len * 2 + 1024;
+    char *dest = malloc(cap);
+    size_t di = 0;
+
+    size_t start = 0;
+    for (size_t si = 0; si <= input_len; si++) {
+        if (si == input_len || input[si] == '\n' || input[si] == '\r') {
+            size_t len = si - start;
+            if (len > 0) {
+                char *line_copy = malloc(len + 1);
+                memcpy(line_copy, input + start, len);
+                line_copy[len] = '\0';
+
+                if (strncmp(line_copy, "//", 2) == 0 || line_copy[0] == '*') {
+                    append_str(&dest, &di, &cap, "\033[32m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else if (line_copy[0] == '#') {
+                    append_str(&dest, &di, &cap, "\033[35m");
+                    append_str(&dest, &di, &cap, line_copy);
+                    append_str(&dest, &di, &cap, "\033[0m");
+                } else {
+                    const char *keywords[] = {
+                        "if ", "else ", "while ", "for ", "return ", "int ", "char ", "void ",
+                        "static ", "const ", "struct ", "typedef ", "enum ", "double ", "float ",
+                        "sizeof", "switch ", "case ", "break;"
+                    };
+                    size_t num_keywords = sizeof(keywords) / sizeof(keywords[0]);
+
+                    char *curr_pos = line_copy;
+                    while (*curr_pos) {
+                        int matched = 0;
+                        for (size_t k = 0; k < num_keywords; k++) {
+                            size_t kw_len = strlen(keywords[k]);
+                            if (strncmp(curr_pos, keywords[k], kw_len) == 0) {
+                                append_str(&dest, &di, &cap, "\033[1;33m");
+                                for (size_t j = 0; j < kw_len; j++) append_char(&dest, &di, &cap, curr_pos[j]);
+                                append_str(&dest, &di, &cap, "\033[0m");
+                                curr_pos += kw_len;
+                                matched = 1;
+                                break;
+                            }
+                        }
+                        if (!matched) {
+                            append_char(&dest, &di, &cap, *curr_pos++);
+                        }
+                    }
+                }
+                free(line_copy);
+            }
+            if (si < input_len) {
+                append_char(&dest, &di, &cap, input[si]);
+                if (input[si] == '\r' && si + 1 < input_len && input[si + 1] == '\n') {
+                    append_char(&dest, &di, &cap, '\n');
+                    si++;
+                }
+            }
+            start = si + 1;
+        }
+    }
+    dest[di] = '\0';
+    *out_len = di;
+    return dest;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── *
  *  Converter Main Dispatcher                                                  *
  * ─────────────────────────────────────────────────────────────────────────── */
 char* module_convert(const char *filename, const char *input, size_t input_len, size_t *out_len) {
@@ -226,16 +446,26 @@ char* module_convert(const char *filename, const char *input, size_t input_len, 
             return align_csv(input, input_len, out_len, ',');
         } else if (strcmp(ext, ".tsv") == 0) {
             return align_csv(input, input_len, out_len, '\t');
+        } else if (strcmp(ext, ".xml") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".xhtml") == 0) {
+            return pretty_print_xml(input, input_len, out_len);
+        } else if (strcmp(ext, ".diff") == 0 || strcmp(ext, ".patch") == 0) {
+            return colorize_diff(input, input_len, out_len);
+        } else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 || strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0) {
+            return colorize_c_code(input, input_len, out_len);
+        } else if (strcmp(ext, ".log") == 0) {
+            return colorize_logs(input, input_len, out_len);
         }
     }
 
-    // Fallback: sniff first non-whitespace character for JSON
     size_t si = 0;
     while (si < input_len && (input[si] == ' ' || input[si] == '\t' || input[si] == '\n' || input[si] == '\r')) {
         si++;
     }
     if (si < input_len && (input[si] == '{' || input[si] == '[')) {
         return pretty_print_json(input, input_len, out_len);
+    }
+    if (si < input_len && input[si] == '<') {
+        return pretty_print_xml(input, input_len, out_len);
     }
 
     return NULL;

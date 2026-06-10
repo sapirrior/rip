@@ -156,21 +156,39 @@ static void print_line_safe(const char *line, regex_t *re, int has_re, int max_c
     int visual_col = 0;
     int printed_cols = 0;
     int hl_active = 0;
-    regoff_t ms = -1, me = -1;
+
+    regmatch_t matches[128];
+    int num_matches = 0;
+    if (has_re) {
+        size_t search_off = 0;
+        while (search_off < len && num_matches < 128) {
+            regmatch_t m;
+            if (regexec(re, line + search_off, 1, &m, 0) == 0) {
+                size_t start_idx = search_off + m.rm_so;
+                size_t end_idx = search_off + m.rm_eo;
+                if (start_idx == end_idx) end_idx = start_idx + 1;
+                matches[num_matches].rm_so = start_idx;
+                matches[num_matches].rm_eo = end_idx;
+                num_matches++;
+                search_off = end_idx;
+            } else {
+                break;
+            }
+        }
+    }
 
     while (offset < len && printed_cols < max_cols) {
-        /* Check if we need to query search match */
-        if (has_re && (ms == -1 || offset >= (size_t)me)) {
-            regmatch_t m;
-            if (regexec(re, line + offset, 1, &m, 0) == 0) {
-                ms = offset + m.rm_so;
-                me = offset + m.rm_eo;
-                /* If empty match, force at least 1 byte to prevent infinite loop */
-                if (ms == me) me = ms + 1;
-            } else {
-                ms = -1;
-                me = -1;
+        /* Check for ANSI escape sequences first to pass them through */
+        if (line[offset] == '\033' && offset + 1 < len && line[offset + 1] == '[') {
+            printf("\033[");
+            offset += 2;
+            while (offset < len && !(line[offset] >= 64 && line[offset] <= 126)) {
+                putchar(line[offset++]);
             }
+            if (offset < len) {
+                putchar(line[offset++]);
+            }
+            continue;
         }
 
         /* Decode character */
@@ -179,7 +197,13 @@ static void print_line_safe(const char *line, regex_t *re, int has_re, int max_c
         int char_width = some_char_width(ch, visual_col);
 
         /* Determine highlighting state for the starting byte */
-        int should_hl = (ms != -1 && offset >= (size_t)ms && offset < (size_t)me);
+        int should_hl = 0;
+        for (int i = 0; i < num_matches; i++) {
+            if (offset >= (size_t)matches[i].rm_so && offset < (size_t)matches[i].rm_eo) {
+                should_hl = 1;
+                break;
+            }
+        }
 
         /* Print or skip columns */
         int cols_to_print = (visual_col + char_width) - horiz;
@@ -309,9 +333,20 @@ void some_render(some_state_t *state) {
                 int vis_w = 0;
                 size_t off = 0;
                 while (off < raw_len) {
+                    if (raw[off] == '\033' && off + 1 < raw_len && raw[off + 1] == '[') {
+                        off += 2;
+                        while (off < raw_len && !(raw[off] >= 64 && raw[off] <= 126)) {
+                            off++;
+                        }
+                        if (off < raw_len) {
+                            off++;
+                        }
+                        continue;
+                    }
                     unsigned int ch;
-                    off += some_decode_utf8(raw + off, raw_len - off, &ch);
+                    int clen = some_decode_utf8(raw + off, raw_len - off, &ch);
                     vis_w += some_char_width(ch, vis_w);
+                    off += clen;
                 }
                 if (horiz < vis_w && vis_w > horiz + content_cols) {
                     continues = 1;
@@ -415,6 +450,8 @@ static void search_prompt(some_state_t *state, int forward) {
     char ch = forward ? '/' : '?';
     char buf[256] = {0};
     int  len = 0;
+    int  hist_idx = state->search_history_count;
+    char temp_typed[256] = {0};
 
     printf("\033[%d;1H\033[K%c", state->term_rows, ch);
     fflush(stdout);
@@ -431,6 +468,29 @@ static void search_prompt(some_state_t *state, int forward) {
         } else if (key == '\033') {
             len = 0;
             break;
+        } else if (key == KEY_ARROW_UP) {
+            if (hist_idx > 0) {
+                if (hist_idx == state->search_history_count) {
+                    strcpy(temp_typed, buf);
+                }
+                hist_idx--;
+                strcpy(buf, state->search_history[hist_idx]);
+                len = strlen(buf);
+                printf("\033[%d;1H\033[K%c%s", state->term_rows, ch, buf);
+                fflush(stdout);
+            }
+        } else if (key == KEY_ARROW_DOWN) {
+            if (hist_idx < state->search_history_count) {
+                hist_idx++;
+                if (hist_idx == state->search_history_count) {
+                    strcpy(buf, temp_typed);
+                } else {
+                    strcpy(buf, state->search_history[hist_idx]);
+                }
+                len = strlen(buf);
+                printf("\033[%d;1H\033[K%c%s", state->term_rows, ch, buf);
+                fflush(stdout);
+            }
         } else if (key == KEY_RESIZE) {
             printf("\033[2J");
             some_get_terminal_size(state);
@@ -443,6 +503,7 @@ static void search_prompt(some_state_t *state, int forward) {
             buf[len]   = '\0';
             putchar(key);
             fflush(stdout);
+            hist_idx = state->search_history_count;
         }
     }
 
@@ -454,6 +515,18 @@ static void search_prompt(some_state_t *state, int forward) {
         }
         memcpy(state->search_pattern, buf, len + 1);
         state->search_dir = forward ? 1 : -1;
+        if (state->search_history_count > 0 && strcmp(state->search_history[state->search_history_count - 1], buf) == 0) {
+            // Already last item
+        } else {
+            if (state->search_history_count < 16) {
+                strcpy(state->search_history[state->search_history_count++], buf);
+            } else {
+                for (int i = 1; i < 16; i++) {
+                    strcpy(state->search_history[i-1], state->search_history[i]);
+                }
+                strcpy(state->search_history[15], buf);
+            }
+        }
         some_update_search_matches(state);
         do_search(state, forward, 1);
     }
@@ -462,6 +535,8 @@ static void search_prompt(some_state_t *state, int forward) {
 static void filter_prompt(some_state_t *state) {
     char buf[256] = {0};
     int  len = 0;
+    int  hist_idx = state->filter_history_count;
+    char temp_typed[256] = {0};
 
     printf("\033[%d;1H\033[K&", state->term_rows);
     fflush(stdout);
@@ -477,6 +552,29 @@ static void filter_prompt(some_state_t *state) {
             }
         } else if (key == '\033') {
             return;
+        } else if (key == KEY_ARROW_UP) {
+            if (hist_idx > 0) {
+                if (hist_idx == state->filter_history_count) {
+                    strcpy(temp_typed, buf);
+                }
+                hist_idx--;
+                strcpy(buf, state->filter_history[hist_idx]);
+                len = strlen(buf);
+                printf("\033[%d;1H\033[K&%s", state->term_rows, buf);
+                fflush(stdout);
+            }
+        } else if (key == KEY_ARROW_DOWN) {
+            if (hist_idx < state->filter_history_count) {
+                hist_idx++;
+                if (hist_idx == state->filter_history_count) {
+                    strcpy(buf, temp_typed);
+                } else {
+                    strcpy(buf, state->filter_history[hist_idx]);
+                }
+                len = strlen(buf);
+                printf("\033[%d;1H\033[K&%s", state->term_rows, buf);
+                fflush(stdout);
+            }
         } else if (key == KEY_RESIZE) {
             printf("\033[2J");
             some_get_terminal_size(state);
@@ -488,16 +586,32 @@ static void filter_prompt(some_state_t *state) {
             buf[len]   = '\0';
             putchar(key);
             fflush(stdout);
+            hist_idx = state->filter_history_count;
         }
     }
 
-    /* Update filter pattern and reflow */
     char err_msg[256];
     if (validate_regex(buf, state->search_case_insensitive, err_msg, sizeof(err_msg)) != 0) {
         snprintf(state->status_msg, sizeof(state->status_msg), "Invalid regex: %s", err_msg);
         return;
     }
     memcpy(state->filter_pattern, buf, len + 1);
+
+    if (len > 0) {
+        if (state->filter_history_count > 0 && strcmp(state->filter_history[state->filter_history_count - 1], buf) == 0) {
+            // Already last item
+        } else {
+            if (state->filter_history_count < 16) {
+                strcpy(state->filter_history[state->filter_history_count++], buf);
+            } else {
+                for (int i = 1; i < 16; i++) {
+                    strcpy(state->filter_history[i-1], state->filter_history[i]);
+                }
+                strcpy(state->filter_history[15], buf);
+            }
+        }
+    }
+
     some_reflow_all(state);
     state->top_line = 0;
     clamp_top(state);
@@ -506,6 +620,48 @@ static void filter_prompt(some_state_t *state) {
     } else {
         snprintf(state->status_msg, sizeof(state->status_msg), "Filter cleared.");
     }
+}
+
+static void show_info_overlay(some_state_t *state) {
+    int w = 50;
+    int h = 9;
+    int start_row = (state->term_rows - h) / 2;
+    int start_col = (state->term_cols - w) / 2;
+    if (start_row < 1) start_row = 1;
+    if (start_col < 1) start_col = 1;
+
+    printf("\033[%d;%dH\033[1;36m┌", start_row, start_col);
+    for (int i = 0; i < w - 2; i++) printf("─");
+    printf("┐\033[0m");
+
+    printf("\033[%d;%dH\033[1;36m│\033[0m\033[1;37m%-*s\033[1;36m│\033[0m", start_row + 1, start_col, w - 2, "                   FILE INFO");
+
+    printf("\033[%d;%dH\033[1;36m├", start_row + 2, start_col);
+    for (int i = 0; i < w - 2; i++) printf("─");
+    printf("┤\033[0m");
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), " File: %s", state->filename ? state->filename : "stdin");
+    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 3, start_col, w - 2, buf);
+
+    snprintf(buf, sizeof(buf), " Size: %zu bytes", state->file_size);
+    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 4, start_col, w - 2, buf);
+
+    snprintf(buf, sizeof(buf), " Lines: %zu raw / %zu display", state->num_raw_lines, state->num_display_lines);
+    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 5, start_col, w - 2, buf);
+
+    snprintf(buf, sizeof(buf), " Options: wrap=%s, case-insensitive=%s", state->wrap_enabled ? "ON" : "OFF", state->search_case_insensitive ? "ON" : "OFF");
+    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 6, start_col, w - 2, buf);
+
+    printf("\033[%d;%dH\033[1;36m│\033[0m\033[5m%-*s\033[0m\033[1;36m│\033[0m", start_row + 7, start_col, w - 2, "            [Press any key to close]");
+
+    printf("\033[%d;%dH\033[1;36m└", start_row + 8, start_col);
+    for (int i = 0; i < w - 2; i++) printf("─");
+    printf("┘\033[0m");
+    fflush(stdout);
+
+    some_read_key(state);
+    some_render(state);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── *
@@ -1046,27 +1202,7 @@ void some_run(some_state_t *state) {
 
             /* ── file info ── */
             case '=': {
-                int text_rows = state->term_rows - 1;
-                size_t bot = state->top_line + text_rows;
-                if (bot > state->num_display_lines) bot = state->num_display_lines;
-                int pct = 0;
-                if (state->num_display_lines > 0) {
-                    pct = (int)(100 * bot / state->num_display_lines);
-                    if (pct > 100) pct = 100;
-                }
-                size_t byte_bot = 0;
-                if (state->num_display_lines > 0 && bot > 0) {
-                    size_t line_idx = bot - 1;
-                    byte_bot = state->display_lines[line_idx].byte_offset + state->display_lines[line_idx].len;
-                }
-                snprintf(state->status_msg, sizeof(state->status_msg),
-                         "%s  line %zu/%zu  (%d%%)  byte %zu/%zu",
-                         state->filename ? state->filename : "stdin",
-                         bot,
-                         state->num_display_lines,
-                         pct,
-                         byte_bot,
-                         state->file_size);
+                show_info_overlay(state);
                 break;
             }
 

@@ -75,6 +75,12 @@ typedef struct {
     size_t search_matches_capacity;
     int current_match_idx;
 
+    /* ── Search/Filter History ── */
+    char search_history[16][256];
+    int search_history_count;
+    char filter_history[16][256];
+    int filter_history_count;
+
     /* ── Incremental loading state ── */
     int stdin_eof;
     int raw_last_has_newline;
