@@ -41,6 +41,7 @@ ast_node_t* parse_c_to_ast(const char *input, size_t input_len);
 ast_node_t* parse_py_to_ast(const char *input, size_t input_len);
 ast_node_t* parse_log_to_ast(const char *input, size_t input_len);
 ast_node_t* parse_diff_to_ast(const char *input, size_t input_len);
+ast_node_t* parse_txt_to_ast(const char *input, size_t input_len);
 
 // Formatters
 char* gen_json_format(const char *input, size_t input_len, size_t *out_len);

@@ -130,5 +130,8 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
         return gen_xml_format(input, input_len, out_len);
     }
 
-    return NULL;
+    ast_node_t *ast = parse_txt_to_ast(input, input_len);
+    char *res = ast_highlight_stream(ast, out_len);
+    ast_free_nodes(ast);
+    return res;
 }
