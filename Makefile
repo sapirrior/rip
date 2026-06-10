@@ -1,5 +1,6 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Iinclude -O2 -std=c99 -D_GNU_SOURCE
+VERSION ?= v0.0.1
+CFLAGS  = -Wall -Wextra -Iinclude -O2 -std=c99 -D_GNU_SOURCE -DSOME_VERSION=\"$(VERSION)\"
 LDFLAGS =
 
 # Core sources

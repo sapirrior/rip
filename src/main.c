@@ -73,7 +73,10 @@ int main(int argc, char *argv[]) {
     const char *filepath = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            printf("some version %s\n", SOME_VERSION);
+            return 0;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
             strcmp(argv[i], "-?")    == 0) {
             print_help_cli(argv[0]);
             return 0;
