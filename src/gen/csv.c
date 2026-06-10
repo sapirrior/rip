@@ -22,7 +22,7 @@ static void append_str(char **dest, size_t *di, size_t *cap, const char *s) {
     *di += len;
 }
 
-char* gen_csv_format(const char *input, size_t input_len, size_t *out_len, char separator) {
+static char* align_csv(const char *input, size_t input_len, size_t *out_len, char separator) {
     int rows_count = 0;
     for (size_t i = 0; i < input_len; i++) {
         if (input[i] == '\n') rows_count++;
@@ -134,4 +134,46 @@ char* gen_csv_format(const char *input, size_t input_len, size_t *out_len, char 
 
     *out_len = di;
     return dest;
+}
+
+static char* gen_csv_format_comma(const char *input, size_t input_len, size_t *out_len) {
+    return align_csv(input, input_len, out_len, ',');
+}
+
+static char* gen_csv_format_tab(const char *input, size_t input_len, size_t *out_len) {
+    return align_csv(input, input_len, out_len, '\t');
+}
+
+static const syntax_def_t csv_syntax_def = {
+    .extension = ".csv",
+    .keywords = NULL,
+    .num_keywords = 0,
+    .types = NULL,
+    .num_types = 0,
+    .line_comment = NULL,
+    .block_comment_start = NULL,
+    .block_comment_end = NULL,
+    .format_fn = gen_csv_format_comma,
+    .parse_fn = NULL
+};
+
+static const syntax_def_t tsv_syntax_def = {
+    .extension = ".tsv",
+    .keywords = NULL,
+    .num_keywords = 0,
+    .types = NULL,
+    .num_types = 0,
+    .line_comment = NULL,
+    .block_comment_start = NULL,
+    .block_comment_end = NULL,
+    .format_fn = gen_csv_format_tab,
+    .parse_fn = NULL
+};
+
+const syntax_def_t* get_csv_syntax_def(void) {
+    return &csv_syntax_def;
+}
+
+const syntax_def_t* get_tsv_syntax_def(void) {
+    return &tsv_syntax_def;
 }
