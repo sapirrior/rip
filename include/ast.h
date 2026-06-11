@@ -47,9 +47,19 @@ typedef struct {
 char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len, int enable_colors);
 
 // Node helpers
+typedef struct {
+    unsigned char context;       // 0 = default, 1 = block comment, 2 = string, 3 = py triple double quote, 4 = py triple single quote, 5 = xml comment, 6 = xml tag
+    char string_quote;           // '\'' or '"'
+    unsigned char brace_depth;
+    unsigned char paren_depth;
+    unsigned char bracket_depth;
+} syntax_state_t;
+
+// Node helpers
 ast_node_t* ast_create_node(ast_node_type_t type, const char *start, size_t len);
 void ast_free_nodes(ast_node_t *head);
 char* ast_highlight_stream(ast_node_t *head, size_t *out_len);
+void ast_highlight_display_lines(void *some_state_ptr);
 
 // Syntax definitions declarations
 const syntax_def_t* get_c_syntax_def(void);

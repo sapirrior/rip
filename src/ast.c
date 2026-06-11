@@ -1,3 +1,4 @@
+#include "some.h"
 #include "ast.h"
 #include <stdlib.h>
 #include <string.h>
@@ -158,7 +159,7 @@ static int is_all_caps(const char *s, size_t len) {
     return has_letter;
 }
 
-static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, const syntax_def_t *def) {
+static ast_node_t* generic_lexer_to_ast_state(const char *input, size_t input_len, const syntax_def_t *def, syntax_state_t *state) {
     ast_node_t *head = NULL, *tail = NULL;
     size_t i = 0;
 
@@ -166,6 +167,112 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
     int last_was_struct_or_union = 0;
 
     while (i < input_len) {
+        // Handle current state context
+        if (state->context == 1) { // block comment
+            size_t start = i;
+            size_t bce_len = def->block_comment_end ? strlen(def->block_comment_end) : 0;
+            int found = 0;
+            while (i < input_len) {
+                if (bce_len && i + bce_len <= input_len && strncmp(input + i, def->block_comment_end, bce_len) == 0) {
+                    i += bce_len;
+                    state->context = 0;
+                    found = 1;
+                    break;
+                }
+                i++;
+            }
+            ast_node_t *node = ast_create_node(AST_NODE_COMMENT, input + start, i - start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
+        if (state->context == 2) { // string
+            size_t start = i;
+            char quote = state->string_quote;
+            int found = 0;
+            while (i < input_len) {
+                if (input[i] == quote) {
+                    i++;
+                    state->context = 0;
+                    found = 1;
+                    break;
+                }
+                if (input[i] == '\\' && i + 1 < input_len) {
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            // If we reached the end of this display line segment without finding the closing quote,
+            // we consume all remaining characters and keep state->context as 2.
+            ast_node_t *node = ast_create_node(AST_NODE_STRING, input + start, i - start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
+        if (state->context == 3 || state->context == 4) { // py triple double/single quote
+            size_t start = i;
+            char quote = (state->context == 3) ? '"' : '\'';
+            int found = 0;
+            while (i + 2 < input_len) {
+                if (input[i] == quote && input[i+1] == quote && input[i+2] == quote) {
+                    i += 3;
+                    state->context = 0;
+                    found = 1;
+                    break;
+                }
+                if (input[i] == '\\' && i + 1 < input_len) {
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            if (!found) i = input_len; // Consume the rest of the line
+            ast_node_t *node = ast_create_node(AST_NODE_STRING, input + start, i - start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
+        if (state->context == 5) { // xml comment
+            size_t start = i;
+            int found = 0;
+            while (i + 2 < input_len) {
+                if (input[i] == '-' && input[i+1] == '-' && input[i+2] == '>') {
+                    i += 3;
+                    state->context = 0;
+                    found = 1;
+                    break;
+                }
+                i++;
+            }
+            if (!found) i = input_len;
+            ast_node_t *node = ast_create_node(AST_NODE_COMMENT, input + start, i - start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
+        if (state->context == 6) { // xml tag
+            size_t start = i;
+            int found = 0;
+            while (i < input_len) {
+                if (input[i] == '>') {
+                    i++;
+                    state->context = 0;
+                    found = 1;
+                    break;
+                }
+                i++;
+            }
+            ast_node_t *node = ast_create_node(AST_NODE_TEXT, input + start, i - start);
+            if (!head) head = node; else tail->next = node;
+            tail = node;
+            continue;
+        }
+
         // 1. Whitespace
         if (isspace((unsigned char)input[i])) {
             size_t ws_start = i;
@@ -196,25 +303,17 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
         // 3. Multi-line block comment
         if (def->block_comment_start && def->block_comment_end) {
             size_t bcs_len = strlen(def->block_comment_start);
-            size_t bce_len = strlen(def->block_comment_end);
             if (i + bcs_len <= input_len && strncmp(input + i, def->block_comment_start, bcs_len) == 0) {
-                size_t comment_start = i;
-                i += bcs_len;
-                while (i < input_len) {
-                    if (i + bce_len <= input_len && strncmp(input + i, def->block_comment_end, bce_len) == 0) {
-                        i += bce_len;
-                        break;
-                    }
-                    i++;
-                }
-                ast_node_t *node = ast_create_node(AST_NODE_COMMENT, input + comment_start, i - comment_start);
+                state->context = 1;
+                ast_node_t *node = ast_create_node(AST_NODE_COMMENT, input + i, bcs_len);
                 if (!head) head = node; else tail->next = node;
                 tail = node;
+                i += bcs_len;
                 continue;
             }
         }
 
-        // 4. Preprocessor directive (if extension is C-based)
+        // 4. Preprocessor directive
         if (input[i] == '#' && def->extension && (strcmp(def->extension, ".c") == 0 || strcmp(def->extension, ".cpp") == 0 || strcmp(def->extension, ".h") == 0 || strcmp(def->extension, ".hpp") == 0)) {
             size_t prep_start = i;
             while (i < input_len && input[i] != '\n' && input[i] != '\r') {
@@ -231,7 +330,27 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 5. Python Decorators
+        // 5. XML comments / tags
+        if (def->extension && (strcmp(def->extension, ".xml") == 0 || strcmp(def->extension, ".html") == 0 || strcmp(def->extension, ".xhtml") == 0)) {
+            if (i + 4 <= input_len && strncmp(input + i, "<!--", 4) == 0) {
+                state->context = 5;
+                ast_node_t *node = ast_create_node(AST_NODE_COMMENT, input + i, 4);
+                if (!head) head = node; else tail->next = node;
+                tail = node;
+                i += 4;
+                continue;
+            }
+            if (input[i] == '<') {
+                state->context = 6;
+                ast_node_t *node = ast_create_node(AST_NODE_TEXT, input + i, 1);
+                if (!head) head = node; else tail->next = node;
+                tail = node;
+                i++;
+                continue;
+            }
+        }
+
+        // 6. Python Decorators
         if (input[i] == '@' && def->extension && strcmp(def->extension, ".py") == 0) {
             size_t dec_start = i;
             i++;
@@ -244,45 +363,26 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 6. Strings (including Python triple quotes)
+        // 7. Strings
         if (input[i] == '"' || input[i] == '\'') {
             char quote = input[i];
-            size_t str_start = i;
             if (def->extension && strcmp(def->extension, ".py") == 0 && i + 2 < input_len && input[i+1] == quote && input[i+2] == quote) {
+                state->context = (quote == '"') ? 3 : 4;
                 i += 3;
-                while (i + 2 < input_len) {
-                    if (input[i] == quote && input[i+1] == quote && input[i+2] == quote) {
-                        i += 3;
-                        break;
-                    }
-                    if (input[i] == '\\' && i + 1 < input_len) {
-                        i += 2;
-                    } else {
-                        i++;
-                    }
-                }
+                continue;
             } else {
+                state->context = 2;
+                state->string_quote = quote;
+                // We consume the opening quote here and let subsequent iterations or state handling handle the rest
+                ast_node_t *node = ast_create_node(AST_NODE_STRING, input + i, 1);
+                if (!head) head = node; else tail->next = node;
+                tail = node;
                 i++;
-                while (i < input_len && input[i] != quote && input[i] != '\n' && input[i] != '\r') {
-                    if (input[i] == '\\' && i + 1 < input_len) {
-                        if (input[i+1] == '\r' && i + 2 < input_len && input[i+2] == '\n') {
-                            i += 3;
-                        } else {
-                            i += 2;
-                        }
-                    } else {
-                        i++;
-                    }
-                }
-                if (i < input_len && input[i] == quote) i++;
+                continue;
             }
-            ast_node_t *node = ast_create_node(AST_NODE_STRING, input + str_start, i - str_start);
-            if (!head) head = node; else tail->next = node;
-            tail = node;
-            continue;
         }
 
-        // 7. Numbers (hex, octal, float, etc.)
+        // 8. Numbers
         if (isdigit((unsigned char)input[i]) || (input[i] == '.' && i + 1 < input_len && isdigit((unsigned char)input[i+1]))) {
             size_t num_start = i;
             if (input[i] == '0' && i + 1 < input_len && (input[i+1] == 'x' || input[i+1] == 'X')) {
@@ -301,7 +401,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 8. Identifiers
+        // 9. Identifiers
         if (isalpha((unsigned char)input[i]) || input[i] == '_') {
             size_t id_start = i;
             while (i < input_len && (isalnum((unsigned char)input[i]) || input[i] == '_')) {
@@ -326,7 +426,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
                 type = AST_NODE_TYPE;
                 last_was_struct_or_union = 0;
             } else if (is_all_caps(input + id_start, id_len)) {
-                type = AST_NODE_NUMBER; // Map constants to number/constant color scheme
+                type = AST_NODE_NUMBER;
             } else {
                 size_t next_idx = i;
                 while (next_idx < input_len && isspace((unsigned char)input[next_idx])) {
@@ -343,8 +443,16 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 9. Operators
+        // 10. Operators
         if (strchr("+-*/%=&|^!~<>(){}[];:.,?", input[i])) {
+            char op = input[i];
+            if (op == '{') state->brace_depth++;
+            else if (op == '}') { if (state->brace_depth > 0) state->brace_depth--; }
+            else if (op == '(') state->paren_depth++;
+            else if (op == ')') { if (state->paren_depth > 0) state->paren_depth--; }
+            else if (op == '[') state->bracket_depth++;
+            else if (op == ']') { if (state->bracket_depth > 0) state->bracket_depth--; }
+
             ast_node_t *node = ast_create_node(AST_NODE_OPERATOR, input + i, 1);
             if (!head) head = node; else tail->next = node;
             tail = node;
@@ -352,7 +460,7 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
             continue;
         }
 
-        // 10. Catch-all text
+        // 11. Catch-all text
         ast_node_t *node = ast_create_node(AST_NODE_TEXT, input + i, 1);
         if (!head) head = node; else tail->next = node;
         tail = node;
@@ -360,6 +468,12 @@ static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, con
     }
 
     return head;
+}
+
+static ast_node_t* generic_lexer_to_ast(const char *input, size_t input_len, const syntax_def_t *def) {
+    syntax_state_t state;
+    memset(&state, 0, sizeof(state));
+    return generic_lexer_to_ast_state(input, input_len, def, &state);
 }
 
 char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len, int enable_colors) {
@@ -448,5 +562,120 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
     g_pool_active = 0;
 
     return res;
+}
+
+void ast_highlight_display_lines(void *some_state_ptr) {
+    some_state_t *state = (some_state_t *)some_state_ptr;
+    if (!state->syntax_highlighting || !state->filename || state->num_display_lines == 0) return;
+
+    const syntax_def_t* def = NULL;
+    const char *ext = strrchr(state->filename, '.');
+    if (ext) {
+        if (strcmp(ext, ".json") == 0) def = get_json_syntax_def();
+        else if (strcmp(ext, ".csv") == 0) def = get_csv_syntax_def();
+        else if (strcmp(ext, ".tsv") == 0) def = get_tsv_syntax_def();
+        else if (strcmp(ext, ".xml") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".xhtml") == 0) def = get_xml_syntax_def();
+        else if (strcmp(ext, ".diff") == 0 || strcmp(ext, ".patch") == 0) def = get_diff_syntax_def();
+        else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 || strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0) def = get_c_syntax_def();
+        else if (strcmp(ext, ".log") == 0) def = get_log_syntax_def();
+        else if (strcmp(ext, ".py") == 0) def = get_py_syntax_def();
+        else if (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0 || strcmp(ext, ".cjs") == 0 ||
+                 strcmp(ext, ".ts") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".tsx") == 0) {
+            def = get_js_syntax_def();
+        }
+    }
+
+    if (!def) {
+        // Check content fallback inside first line
+        some_line_t *first = &state->display_lines[0];
+        size_t si = 0;
+        while (si < first->len && (first->data[si] == ' ' || first->data[si] == '\t')) si++;
+        if (si < first->len && (first->data[si] == '{' || first->data[si] == '[')) {
+            def = get_json_syntax_def();
+        } else if (si < first->len && first->data[si] == '<') {
+            def = get_xml_syntax_def();
+        } else {
+            def = get_txt_syntax_def();
+        }
+    }
+
+    // 1. Compute state at the start of each RAW line sequentially.
+    // This gives us a highly accurate AST context mapping of the document,
+    // exactly like Treesitter / modern editors, regardless of visual wraps.
+    syntax_state_t *raw_states = malloc(state->num_raw_lines * sizeof(syntax_state_t));
+    syntax_state_t curr_state;
+    memset(&curr_state, 0, sizeof(curr_state));
+
+    g_pool_active = 1;
+
+    for (size_t r = 0; r < state->num_raw_lines; r++) {
+        raw_states[r] = curr_state;
+        // Parse the raw line plain text to update the running compiler/AST state
+        some_line_t *raw_line = &state->raw_lines[r];
+        ast_node_t *ast = NULL;
+        if (def->parse_fn) {
+            ast = def->parse_fn(raw_line->data, raw_line->len);
+        } else {
+            ast = generic_lexer_to_ast_state(raw_line->data, raw_line->len, def, &curr_state);
+        }
+        if (ast) {
+            ast_free_nodes(ast);
+        }
+    }
+
+    // 2. Highlight each display line using the cached state of its corresponding raw line.
+    for (size_t i = 0; i < state->num_display_lines; i++) {
+        some_line_t *line = &state->display_lines[i];
+        size_t raw_idx = line->raw_line_idx;
+        
+        // Retrieve the start state of the corresponding raw line
+        syntax_state_t line_start_state = (raw_idx < state->num_raw_lines) ? raw_states[raw_idx] : curr_state;
+
+        // However, if this display line is a wrapped continuation of the same raw line,
+        // we must parse from the byte offset within the raw line. To achieve this,
+        // we parse the raw line up to the byte offset to get the precise nested context.
+        if (raw_idx < state->num_raw_lines) {
+            some_line_t *raw_line = &state->raw_lines[raw_idx];
+            size_t inner_offset = line->byte_offset - raw_line->byte_offset;
+            if (inner_offset > 0 && inner_offset <= raw_line->len) {
+                // Determine the parser state exactly at the wrap split boundary
+                ast_node_t *prefix_ast = NULL;
+                if (!def->parse_fn) {
+                    prefix_ast = generic_lexer_to_ast_state(raw_line->data, inner_offset, def, &line_start_state);
+                    if (prefix_ast) {
+                        ast_free_nodes(prefix_ast);
+                    }
+                }
+            }
+        }
+
+        ast_node_t *ast = NULL;
+        if (def->parse_fn) {
+            ast = def->parse_fn(line->data, line->len);
+        } else {
+            ast = generic_lexer_to_ast_state(line->data, line->len, def, &line_start_state);
+        }
+
+        size_t highlighted_len = 0;
+        char *highlighted = ast_highlight_stream(ast, &highlighted_len);
+        ast_free_nodes(ast);
+
+        free(line->data);
+        line->data = highlighted;
+        line->len = highlighted_len;
+    }
+
+    free(raw_states);
+
+    // Free pool blocks
+    ast_pool_block_t *block = g_pool_head;
+    while (block) {
+        ast_pool_block_t *tmp = block->next;
+        free(block);
+        block = tmp;
+    }
+    g_pool_head = NULL;
+    g_pool_current = NULL;
+    g_pool_active = 0;
 }
 

@@ -318,6 +318,10 @@ void some_reflow_all(some_state_t *state) {
         regfree(&filter_re);
     }
 
+    if (state->syntax_highlighting) {
+        ast_highlight_display_lines(state);
+    }
+
     /* Calculate the visual width of the longest display line */
     int max_w = 0;
     for (size_t i = 0; i < state->num_display_lines; i++) {
@@ -402,10 +406,34 @@ static int load_from_fp(some_state_t *state, FILE *fp) {
     buf[len] = '\0';
     state->file_size = len;
 
+    // Use formatting filter if present (e.g. CSV alignment or JSON pretty-print)
+    const syntax_def_t* def = NULL;
+    if (state->filename) {
+        const char *ext = strrchr(state->filename, '.');
+        if (ext) {
+            if (strcmp(ext, ".json") == 0) def = get_json_syntax_def();
+            else if (strcmp(ext, ".csv") == 0) def = get_csv_syntax_def();
+            else if (strcmp(ext, ".tsv") == 0) def = get_tsv_syntax_def();
+            else if (strcmp(ext, ".xml") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".xhtml") == 0) def = get_xml_syntax_def();
+            else if (strcmp(ext, ".diff") == 0 || strcmp(ext, ".patch") == 0) def = get_diff_syntax_def();
+            else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 || strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0) def = get_c_syntax_def();
+            else if (strcmp(ext, ".log") == 0) def = get_log_syntax_def();
+            else if (strcmp(ext, ".py") == 0) def = get_py_syntax_def();
+            else if (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0 || strcmp(ext, ".cjs") == 0 ||
+                     strcmp(ext, ".ts") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".tsx") == 0) {
+                def = get_js_syntax_def();
+            }
+        }
+    }
+
+    char *formatted = NULL;
     size_t out_len = len;
-    char *converted = ast_convert(state->filename, buf, len, &out_len, state->syntax_highlighting);
-    const char *src  = converted ? converted : buf;
-    size_t src_len   = converted ? out_len   : len;
+    if (def && def->format_fn) {
+        formatted = def->format_fn(buf, len, &out_len);
+    }
+
+    const char *src = formatted ? formatted : buf;
+    size_t src_len = out_len;
 
     if (src_len > 0) {
         state->raw_last_has_newline = (src[src_len - 1] == '\n' || src[src_len - 1] == '\r');
@@ -424,7 +452,7 @@ static int load_from_fp(some_state_t *state, FILE *fp) {
     }
 
     free(buf);
-    if (converted) free(converted);
+    if (formatted) free(formatted);
 
     if (state->diff_enabled) {
         some_load_diff_status(state);
