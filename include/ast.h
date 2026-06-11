@@ -61,5 +61,6 @@ const syntax_def_t* get_xml_syntax_def(void);
 const syntax_def_t* get_diff_syntax_def(void);
 const syntax_def_t* get_log_syntax_def(void);
 const syntax_def_t* get_txt_syntax_def(void);
+const syntax_def_t* get_js_syntax_def(void);
 
 #endif // SOME_AST_H

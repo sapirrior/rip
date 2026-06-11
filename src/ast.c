@@ -376,6 +376,10 @@ char* ast_convert(const char *filename, const char *input, size_t input_len, siz
         else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 || strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0) def = get_c_syntax_def();
         else if (strcmp(ext, ".log") == 0) def = get_log_syntax_def();
         else if (strcmp(ext, ".py") == 0) def = get_py_syntax_def();
+        else if (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0 || strcmp(ext, ".cjs") == 0 ||
+                 strcmp(ext, ".ts") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".tsx") == 0) {
+            def = get_js_syntax_def();
+        }
     }
 
     if (!def) {
