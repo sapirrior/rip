@@ -71,7 +71,7 @@ static const syntax_def_t xml_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = gen_xml_format,
-    .parse_fn = NULL
+    .highlight_fn = NULL
 };
 
 const syntax_def_t* get_xml_syntax_def(void) {

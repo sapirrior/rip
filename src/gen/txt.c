@@ -1,7 +1,10 @@
 #include "ast.h"
 
-static ast_node_t* parse_txt_to_ast(const char *input, size_t input_len) {
-    return ast_create_node(AST_NODE_TEXT, input, input_len);
+static void highlight_txt(const char *input, size_t input_len, syntax_state_t *state, char **dest, size_t *di, size_t *cap) {
+    (void)state;
+    for (size_t i = 0; i < input_len; i++) {
+        ast_append_char(dest, di, cap, input[i]);
+    }
 }
 
 static const syntax_def_t txt_syntax_def = {
@@ -14,7 +17,7 @@ static const syntax_def_t txt_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = NULL,
-    .parse_fn = parse_txt_to_ast
+    .highlight_fn = highlight_txt
 };
 
 const syntax_def_t* get_txt_syntax_def(void) {

@@ -85,7 +85,7 @@ static const syntax_def_t json_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = gen_json_format,
-    .parse_fn = NULL
+    .highlight_fn = NULL
 };
 
 const syntax_def_t* get_json_syntax_def(void) {

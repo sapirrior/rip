@@ -3,32 +3,16 @@
 
 #include <stddef.h>
 
-typedef enum {
-    AST_NODE_TEXT,
-    AST_NODE_KEYWORD,
-    AST_NODE_TYPE,
-    AST_NODE_STRING,
-    AST_NODE_COMMENT,
-    AST_NODE_NUMBER,
-    AST_NODE_PREPROCESSOR,
-    AST_NODE_IDENTIFIER,
-    AST_NODE_OPERATOR,
-    AST_NODE_FUNCTION,      // for functions/classes
-    AST_NODE_ADDITION,      // for diff +
-    AST_NODE_DELETION,      // for diff -
-    AST_NODE_META,          // for diff @
-    AST_NODE_LOG_ERROR,     // for logs
-    AST_NODE_LOG_WARN,
-    AST_NODE_LOG_INFO,
-    AST_NODE_LOG_DEBUG
-} ast_node_type_t;
+// Node helpers (renamed to state helpers since nodes are gone)
+typedef struct {
+    unsigned char context;       // 0 = default, 1 = block comment, 2 = string, 3 = py triple double quote, 4 = py triple single quote, 5 = xml comment, 6 = xml tag
+    char string_quote;           // '\'' or '"'
+    unsigned char brace_depth;
+    unsigned char paren_depth;
+    unsigned char bracket_depth;
+} syntax_state_t;
 
-typedef struct ast_node {
-    ast_node_type_t type;
-    const char *start;
-    size_t len;
-    struct ast_node *next;
-} ast_node_t;
+typedef void (*highlight_fn_t)(const char *input, size_t input_len, syntax_state_t *state, char **dest, size_t *di, size_t *cap);
 
 typedef struct {
     const char *extension;
@@ -41,24 +25,11 @@ typedef struct {
     const char *block_comment_end;
     
     char* (*format_fn)(const char *input, size_t input_len, size_t *out_len);
-    ast_node_t* (*parse_fn)(const char *input, size_t input_len);
+    highlight_fn_t highlight_fn;
 } syntax_def_t;
 
 char* ast_convert(const char *filename, const char *input, size_t input_len, size_t *out_len, int enable_colors);
 
-// Node helpers
-typedef struct {
-    unsigned char context;       // 0 = default, 1 = block comment, 2 = string, 3 = py triple double quote, 4 = py triple single quote, 5 = xml comment, 6 = xml tag
-    char string_quote;           // '\'' or '"'
-    unsigned char brace_depth;
-    unsigned char paren_depth;
-    unsigned char bracket_depth;
-} syntax_state_t;
-
-// Node helpers
-ast_node_t* ast_create_node(ast_node_type_t type, const char *start, size_t len);
-void ast_free_nodes(ast_node_t *head);
-char* ast_highlight_stream(ast_node_t *head, size_t *out_len);
 void ast_highlight_display_lines(void *some_state_ptr);
 
 // Syntax definitions declarations
@@ -72,5 +43,9 @@ const syntax_def_t* get_diff_syntax_def(void);
 const syntax_def_t* get_log_syntax_def(void);
 const syntax_def_t* get_txt_syntax_def(void);
 const syntax_def_t* get_js_syntax_def(void);
+
+// Provide helper to append directly to a string buffer
+void ast_append_char(char **dest, size_t *di, size_t *cap, char c);
+void ast_append_str(char **dest, size_t *di, size_t *cap, const char *s);
 
 #endif // SOME_AST_H

@@ -22,7 +22,7 @@ static const syntax_def_t c_syntax_def = {
     .block_comment_start = "/*",
     .block_comment_end = "*/",
     .format_fn = NULL,
-    .parse_fn = NULL
+    .highlight_fn = NULL
 };
 
 const syntax_def_t* get_c_syntax_def(void) {

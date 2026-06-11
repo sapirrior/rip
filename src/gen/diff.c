@@ -1,48 +1,41 @@
 #include "ast.h"
 #include <string.h>
 
-static ast_node_t* parse_diff_to_ast(const char *input, size_t input_len) {
-    ast_node_t *head = NULL, *tail = NULL;
+static void highlight_diff(const char *input, size_t input_len, syntax_state_t *state, char **dest, size_t *di, size_t *cap) {
+    (void)state;
     size_t start = 0;
-
     for (size_t si = 0; si <= input_len; si++) {
         if (si == input_len || input[si] == '\n' || input[si] == '\r') {
             size_t len = si - start;
             if (len > 0) {
-                ast_node_type_t type = AST_NODE_TEXT;
+                const char *color = NULL;
                 if (input[start] == '+') {
-                    type = AST_NODE_ADDITION;
+                    color = "\033[38;2;126;231;135m"; // green
                 } else if (input[start] == '-') {
-                    type = AST_NODE_DELETION;
+                    color = "\033[38;2;255;123;114m"; // red
                 } else if (input[start] == '@') {
-                    type = AST_NODE_META;
+                    color = "\033[38;2;210;168;255m"; // purple
                 }
-                ast_node_t *node = ast_create_node(type, input + start, len);
-                if (!head) {
-                    head = node;
-                } else {
-                    tail->next = node;
+
+                if (color) ast_append_str(dest, di, cap, color);
+                for (size_t i = 0; i < len; i++) {
+                    ast_append_char(dest, di, cap, input[start + i]);
                 }
-                tail = node;
+                if (color) ast_append_str(dest, di, cap, "\033[0m");
             }
             if (si < input_len) {
                 size_t nl_len = 1;
                 if (input[si] == '\r' && si + 1 < input_len && input[si + 1] == '\n') {
                     nl_len = 2;
                 }
-                ast_node_t *node = ast_create_node(AST_NODE_TEXT, input + si, nl_len);
-                if (!head) {
-                    head = node;
-                } else {
-                    tail->next = node;
+                for (size_t i = 0; i < nl_len; i++) {
+                    ast_append_char(dest, di, cap, input[si + i]);
                 }
-                tail = node;
                 si += nl_len - 1;
             }
             start = si + 1;
         }
     }
-    return head;
 }
 
 static const syntax_def_t diff_syntax_def = {
@@ -55,7 +48,7 @@ static const syntax_def_t diff_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = NULL,
-    .parse_fn = parse_diff_to_ast
+    .highlight_fn = highlight_diff
 };
 
 const syntax_def_t* get_diff_syntax_def(void) {

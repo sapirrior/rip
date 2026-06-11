@@ -154,7 +154,7 @@ static const syntax_def_t csv_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = gen_csv_format_comma,
-    .parse_fn = NULL
+    .highlight_fn = NULL
 };
 
 static const syntax_def_t tsv_syntax_def = {
@@ -167,7 +167,7 @@ static const syntax_def_t tsv_syntax_def = {
     .block_comment_start = NULL,
     .block_comment_end = NULL,
     .format_fn = gen_csv_format_tab,
-    .parse_fn = NULL
+    .highlight_fn = NULL
 };
 
 const syntax_def_t* get_csv_syntax_def(void) {
