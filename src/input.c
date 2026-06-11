@@ -115,24 +115,43 @@ void some_add_display_line(some_state_t *state, const char *data, size_t len, si
 static void wrap_line(some_state_t *state, const char *line, size_t len, int width, size_t raw_offset, size_t raw_line_idx) {
     if (width <= 0) width = 80;
 
+    /* Compute leading indent of the raw line (spaces and tabs) */
     size_t indent_bytes = 0;
     int indent_cols = 0;
+    while (indent_bytes < len) {
+        if (line[indent_bytes] == ' ') {
+            indent_cols++;
+            indent_bytes++;
+        } else if (line[indent_bytes] == '\t') {
+            indent_cols += 8;
+            indent_bytes++;
+        } else {
+            break;
+        }
+    }
 
-    /* We keep indent string to prepend to subsequent lines */
-    char *indent_str = malloc(1);
-    indent_str[0] = '\0';
+    /* Clamp indent columns to at most half the screen width to preserve space for text */
+    if (indent_cols >= width / 2) {
+        indent_cols = (width / 2) > 0 ? (width / 2) : 0;
+        indent_bytes = indent_cols;
+    }
+
+    char *indent_str = malloc(indent_bytes + 1);
+    if (indent_bytes > 0) {
+        memcpy(indent_str, line, indent_bytes);
+    }
+    indent_str[indent_bytes] = '\0';
 
     size_t byte_off = 0;
     int first_line = 1;
     char active_ansi[128] = "";
 
     while (byte_off < len) {
-        /* Determine how many columns we have for this segment */
         int max_cols = first_line ? width : (width > indent_cols ? width - indent_cols : 1);
 
-        /* Walk forward to find the split point (by columns) */
         size_t scan_byte = byte_off;
         int current_cols = 0;
+        size_t last_word_boundary_byte = 0;
 
         while (scan_byte < len) {
             if (line[scan_byte] == '\033' && scan_byte + 1 < len && line[scan_byte + 1] == '[') {
@@ -140,11 +159,10 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
                 while (scan_byte < len && !(line[scan_byte] >= 64 && line[scan_byte] <= 126)) {
                     scan_byte++;
                 }
-                if (scan_byte < len) {
-                    scan_byte++;
-                }
+                if (scan_byte < len) scan_byte++;
                 continue;
             }
+
             unsigned int ch;
             int clen = some_decode_utf8(line + scan_byte, len - scan_byte, &ch);
             int w = some_char_width(ch, current_cols);
@@ -153,21 +171,40 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
                 break;
             }
 
+            if (ch == ' ' || ch == '\t' || ch == '-' || ch == '/' || ch == '\\') {
+                last_word_boundary_byte = scan_byte;
+            }
+
             current_cols += w;
             scan_byte += clen;
         }
 
         size_t split_byte = scan_byte;
+        size_t next_line_start_byte = split_byte;
 
-        /* Prevent infinite loop if no characters fit */
+        if (split_byte < len) {
+            if (last_word_boundary_byte > byte_off) {
+                split_byte = last_word_boundary_byte;
+                unsigned int boundary_ch;
+                int boundary_len = some_decode_utf8(line + split_byte, len - split_byte, &boundary_ch);
+                if (boundary_ch == ' ' || boundary_ch == '\t') {
+                    next_line_start_byte = split_byte + boundary_len;
+                } else {
+                    split_byte += boundary_len;
+                    next_line_start_byte = split_byte;
+                }
+            }
+        }
+
         if (split_byte == byte_off) {
             unsigned int ch;
-            split_byte += some_decode_utf8(line + byte_off, len - byte_off, &ch);
+            int clen = some_decode_utf8(line + byte_off, len - byte_off, &ch);
+            split_byte = byte_off + clen;
+            next_line_start_byte = split_byte;
         }
 
         size_t segment_len = split_byte - byte_off;
 
-        // Traverse segment to update running active_ansi state
         size_t traverse = byte_off;
         while (traverse < split_byte) {
             if (line[traverse] == '\033' && traverse + 1 < split_byte && line[traverse + 1] == '[') {
@@ -176,9 +213,7 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
                 while (traverse < split_byte && !(line[traverse] >= 64 && line[traverse] <= 126)) {
                     traverse++;
                 }
-                if (traverse < split_byte) {
-                    traverse++;
-                }
+                if (traverse < split_byte) traverse++;
                 size_t esc_len = traverse - esc_start;
                 if (esc_len < sizeof(active_ansi)) {
                     if (esc_len == 4 && strncmp(line + esc_start, "\033[0m", 4) == 0) {
@@ -193,37 +228,30 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
             }
         }
 
-        // Build new display line string
         size_t prefix_len = first_line ? 0 : indent_bytes;
         size_t ansi_len = active_ansi[0] ? strlen(active_ansi) : 0;
-        size_t reset_len = active_ansi[0] ? 4 : 0; // \033[0m is 4 bytes
+        size_t reset_len = active_ansi[0] ? 4 : 0;
 
         size_t total_len = prefix_len + ansi_len + segment_len + reset_len;
         char *buf = malloc(total_len + 1);
         char *p = buf;
 
-        // 1. Prepend indent if not first line
         if (prefix_len) {
             memcpy(p, indent_str, prefix_len);
             p += prefix_len;
         }
-
-        // 2. Prepend active ANSI escape if any
         if (ansi_len) {
             memcpy(p, active_ansi, ansi_len);
             p += ansi_len;
         }
-
-        // 3. Copy segment text
-        memcpy(p, line + byte_off, segment_len);
-        p += segment_len;
-
-        // 4. Append reset code if we prepended an active ANSI escape
+        if (segment_len) {
+            memcpy(p, line + byte_off, segment_len);
+            p += segment_len;
+        }
         if (reset_len) {
             memcpy(p, "\033[0m", 4);
             p += 4;
         }
-
         *p = '\0';
 
         some_add_display_line(state, buf, total_len, raw_line_idx);
@@ -231,7 +259,7 @@ static void wrap_line(some_state_t *state, const char *line, size_t len, int wid
         free(buf);
 
         first_line = 0;
-        byte_off = split_byte;
+        byte_off = next_line_start_byte;
     }
 
     free(indent_str);
