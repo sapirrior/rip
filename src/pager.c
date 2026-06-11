@@ -713,41 +713,211 @@ static void filter_prompt(some_state_t *state) {
 }
 
 static void show_info_overlay(some_state_t *state) {
-    int w = 50;
-    int h = 9;
+    // Get latest terminal dimensions
+    some_get_terminal_size(state);
+
+    // Compute maximum dimensions allowed by terminal size
+    // Leave at least a 2-cell margin if possible
+    int max_w = state->term_cols - 4;
+    int max_h = state->term_rows - 2;
+    if (max_w < 20) max_w = 20;
+    if (max_h < 5) max_h = 5;
+
+    // Desired base dimensions: width = 60, height depends on items
+    int w = 60;
+    if (w > max_w) {
+        w = max_w;
+    }
+
+    // Color definitions based on the syntax highlighter:
+    // Border = Purple (\033[38;2;210;168;255m)
+    // Header = Bold Pink (\033[1;38;2;255;123;114m)
+    // Key/Label = Blue (\033[38;2;121;192;255m)
+    // Value = Light Blue (\033[38;2;165;214;255m)
+    const char *c_border = "\033[38;2;210;168;255m";
+    const char *c_header = "\033[1;38;2;255;123;114m";
+    const char *c_key    = "\033[38;2;121;192;255m";
+    const char *c_val    = "\033[38;2;165;214;255m";
+    const char *c_reset  = "\033[0m";
+
+    // Define 12 metadata metrics to display
+    char labels[12][30];
+    char values[12][128];
+    int total_items = 12;
+
+    // Determine syntax type based on filename extension
+    const char *syntax_type = "Plain Text";
+    if (state->filename) {
+        const char *ext = strrchr(state->filename, '.');
+        if (ext) {
+            if (strcmp(ext, ".json") == 0) syntax_type = "JSON";
+            else if (strcmp(ext, ".csv") == 0) syntax_type = "CSV (Comma-Separated)";
+            else if (strcmp(ext, ".tsv") == 0) syntax_type = "TSV (Tab-Separated)";
+            else if (strcmp(ext, ".xml") == 0) syntax_type = "XML";
+            else if (strcmp(ext, ".html") == 0 || strcmp(ext, ".xhtml") == 0) syntax_type = "HTML / XML";
+            else if (strcmp(ext, ".diff") == 0 || strcmp(ext, ".patch") == 0) syntax_type = "Diff / Patch";
+            else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0) syntax_type = "C Source / Header";
+            else if (strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0) syntax_type = "C++ Source / Header";
+            else if (strcmp(ext, ".log") == 0) syntax_type = "Log File";
+            else if (strcmp(ext, ".py") == 0) syntax_type = "Python Script";
+            else if (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0 || strcmp(ext, ".cjs") == 0) syntax_type = "JavaScript";
+            else if (strcmp(ext, ".ts") == 0 || strcmp(ext, ".tsx") == 0) syntax_type = "TypeScript";
+            else if (strcmp(ext, ".jsx") == 0) syntax_type = "React JSX";
+        }
+    }
+
+    // Row 0: Filename
+    strcpy(labels[0], "File Name");
+    snprintf(values[0], sizeof(values[0]), "%s", state->filename ? state->filename : "stdin");
+
+    // Row 1: Source
+    strcpy(labels[1], "Input Source");
+    snprintf(values[1], sizeof(values[1]), "%s", state->is_stdin ? "stdin" : "Local File");
+
+    // Row 2: File Size
+    strcpy(labels[2], "File Size");
+    if (state->file_size < 1024) {
+        snprintf(values[2], sizeof(values[2]), "%zu B", state->file_size);
+    } else if (state->file_size < 1024 * 1024) {
+        snprintf(values[2], sizeof(values[2]), "%.2f KiB (%zu B)", (double)state->file_size / 1024.0, state->file_size);
+    } else {
+        snprintf(values[2], sizeof(values[2]), "%.2f MiB (%zu B)", (double)state->file_size / (1024.0 * 1024.0), state->file_size);
+    }
+
+    // Row 3: Syntax
+    strcpy(labels[3], "File Syntax");
+    snprintf(values[3], sizeof(values[3]), "%s", syntax_type);
+
+    // Row 4: Lines Count
+    strcpy(labels[4], "Total Lines");
+    snprintf(values[4], sizeof(values[4]), "%zu raw / %zu view", state->num_raw_lines, state->num_display_lines);
+
+    // Row 5: Viewport position
+    strcpy(labels[5], "Position");
+    snprintf(values[5], sizeof(values[5]), "Line %zu of %zu", state->top_line + 1, state->num_display_lines > 0 ? state->num_display_lines : 1);
+
+    // Row 6: Word Wrap Mode
+    strcpy(labels[6], "Word Wrap");
+    snprintf(values[6], sizeof(values[6]), "%s", state->wrap_enabled ? "ON" : "OFF");
+
+    // Row 7: Syntax Highlighting
+    strcpy(labels[7], "Highlighting");
+    snprintf(values[7], sizeof(values[7]), "%s", state->syntax_highlighting ? "ON" : "OFF");
+
+    // Row 8: Search Pattern
+    strcpy(labels[8], "Active Search");
+    snprintf(values[8], sizeof(values[8]), "%s", state->search_pattern[0] ? state->search_pattern : "<none>");
+
+    // Row 9: Active Filter
+    strcpy(labels[9], "Active Filter");
+    snprintf(values[9], sizeof(values[9]), "%s", state->filter_pattern[0] ? state->filter_pattern : "<none>");
+
+    // Row 10: Terminal Size
+    strcpy(labels[10], "Terminal Size");
+    snprintf(values[10], sizeof(values[10]), "%dx%d", state->term_rows, state->term_cols);
+
+    // Row 11: Diff Mode
+    strcpy(labels[11], "Diff Status");
+    snprintf(values[11], sizeof(values[11]), "%s", state->diff_enabled ? "ON" : "OFF");
+
+    // Dynamic height constraints: we need 5 structural rows (top border, title, divider, footer text, bottom border)
+    // plus the number of visible items.
+    int structural_rows = 5;
+    int items_to_show = total_items;
+    if (structural_rows + items_to_show > max_h) {
+        items_to_show = max_h - structural_rows;
+    }
+    if (items_to_show < 0) items_to_show = 0;
+
+    int h = structural_rows + items_to_show;
     int start_row = (state->term_rows - h) / 2;
     int start_col = (state->term_cols - w) / 2;
     if (start_row < 1) start_row = 1;
     if (start_col < 1) start_col = 1;
 
-    printf("\033[%d;%dH\033[1;36m┌", start_row, start_col);
+    // Draw Top Border
+    printf("\033[%d;%dH%s┌", start_row, start_col, c_border);
     for (int i = 0; i < w - 2; i++) printf("─");
-    printf("┐\033[0m");
+    printf("┐%s", c_reset);
 
-    printf("\033[%d;%dH\033[1;36m│\033[0m\033[1;37m%-*s\033[1;36m│\033[0m", start_row + 1, start_col, w - 2, "                   FILE INFO");
+    // Draw Title Row
+    char title_buf[64];
+    snprintf(title_buf, sizeof(title_buf), "FILE INFORMATION");
+    // Center title text
+    int title_len = (int)strlen(title_buf);
+    int title_padding = (w - 2 - title_len) / 2;
+    if (title_padding < 0) title_padding = 0;
+    printf("\033[%d;%dH%s│%s%*s%s%*s%s│%s", 
+           start_row + 1, start_col, c_border, 
+           c_header, title_padding + title_len, title_buf, "",
+           (w - 2) - (title_padding + title_len), "",
+           c_border, c_reset);
 
-    printf("\033[%d;%dH\033[1;36m├", start_row + 2, start_col);
+    // Draw Divider
+    printf("\033[%d;%dH%s├", start_row + 2, start_col, c_border);
     for (int i = 0; i < w - 2; i++) printf("─");
-    printf("┤\033[0m");
+    printf("┤%s", c_reset);
 
-    char buf[128];
-    snprintf(buf, sizeof(buf), " File: %s", state->filename ? state->filename : "stdin");
-    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 3, start_col, w - 2, buf);
+    // Render the rows
+    int key_w = 20;
+    if (key_w > w - 10) {
+        key_w = w - 10;
+        if (key_w < 5) key_w = 5;
+    }
 
-    snprintf(buf, sizeof(buf), " Size: %zu bytes", state->file_size);
-    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 4, start_col, w - 2, buf);
+    for (int r = 0; r < items_to_show; r++) {
+        int row_idx = start_row + 3 + r;
+        
+        // Print left border
+        printf("\033[%d;%dH%s│%s", row_idx, start_col, c_border, c_reset);
+        
+        // Format of each row is: "  Key: Value"
+        // Reserve 2 spaces at start, and 2 spaces between key and value
+        // So total width for value is w - 2 (inner width) - 2 (start spaces) - key_w - 2 (": ")
+        int val_w = w - 2 - 2 - key_w - 2;
+        if (val_w < 1) val_w = 1;
 
-    snprintf(buf, sizeof(buf), " Lines: %zu raw / %zu display", state->num_raw_lines, state->num_display_lines);
-    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 5, start_col, w - 2, buf);
+        // Truncate values if they are too long for terminal/overlay width
+        char trunc_val[128];
+        snprintf(trunc_val, sizeof(trunc_val), "%s", values[r]);
+        if ((int)strlen(trunc_val) > val_w) {
+            // Put an ellipsis at the end
+            if (val_w > 3) {
+                trunc_val[val_w - 3] = '.';
+                trunc_val[val_w - 2] = '.';
+                trunc_val[val_w - 1] = '.';
+                trunc_val[val_w] = '\0';
+            } else {
+                trunc_val[val_w] = '\0';
+            }
+        }
 
-    snprintf(buf, sizeof(buf), " Options: wrap=%s, case-insensitive=%s", state->wrap_enabled ? "ON" : "OFF", state->search_case_insensitive ? "ON" : "OFF");
-    printf("\033[%d;%dH\033[1;36m│\033[0m%-*s\033[1;36m│\033[0m", start_row + 6, start_col, w - 2, buf);
+        // Print Key
+        printf("  %s%-*.*s%s: ", c_key, key_w, key_w, labels[r], c_reset);
 
-    printf("\033[%d;%dH\033[1;36m│\033[0m\033[5m%-*s\033[0m\033[1;36m│\033[0m", start_row + 7, start_col, w - 2, "            [Press any key to close]");
+        // Print Value
+        printf("%s%-*.*s%s", c_val, val_w, val_w, trunc_val, c_reset);
+               
+        // Print right border
+        printf("%s│%s", c_border, c_reset);
+    }
 
-    printf("\033[%d;%dH\033[1;36m└", start_row + 8, start_col);
+    // Draw Footer Row
+    const char *footer_text = "[Press any key to close]";
+    int footer_len = (int)strlen(footer_text);
+    int footer_padding = (w - 2 - footer_len) / 2;
+    if (footer_padding < 0) footer_padding = 0;
+
+    printf("\033[%d;%dH%s│%s%*s\033[5m%s\033[0m%s%*s%s│%s", 
+           start_row + 3 + items_to_show, start_col, c_border, c_reset,
+           footer_padding, "", footer_text, c_reset,
+           (w - 2) - (footer_padding + footer_len), "",
+           c_border, c_reset);
+
+    // Draw Bottom Border
+    printf("\033[%d;%dH%s└", start_row + 4 + items_to_show, start_col, c_border);
     for (int i = 0; i < w - 2; i++) printf("─");
-    printf("┘\033[0m");
+    printf("┘%s", c_reset);
     fflush(stdout);
 
     some_read_key(state);

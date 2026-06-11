@@ -2,7 +2,7 @@
 #define SOME_H
 
 #ifndef SOME_VERSION
-#define SOME_VERSION "v0.0.1"
+#define SOME_VERSION "v1.0.0"
 #endif
 
 #include <stddef.h>

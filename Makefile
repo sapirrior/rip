@@ -1,5 +1,5 @@
 CC      = gcc
-VERSION ?= v0.0.1
+VERSION ?= v1.0.0
 CFLAGS  = -Wall -Wextra -Iinclude -O2 -std=c99 -D_GNU_SOURCE -DSOME_VERSION=\"$(VERSION)\"
 LDFLAGS =
 
