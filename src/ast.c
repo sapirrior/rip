@@ -172,6 +172,35 @@ void highlight_line(const char *input, size_t input_len, const syntax_def_t *def
             continue;
         }
 
+        if (state->context == 7) { // single-line comment
+            size_t start = i;
+            while (i < input_len && input[i] != '\n' && input[i] != '\r') {
+                i++;
+            }
+            write_colored_text(input + start, i - start, "\033[38;2;139;148;158m", dest, di, cap);
+            if (i < input_len) {
+                state->context = 0;
+            }
+            continue;
+        }
+
+        if (state->context == 8) { // preprocessor directive
+            size_t start = i;
+            while (i < input_len && input[i] != '\n' && input[i] != '\r') {
+                if (input[i] == '\\' && i + 1 < input_len && (input[i+1] == '\n' || input[i+1] == '\r')) {
+                    i += 2;
+                    if (i < input_len && input[i-1] == '\r' && input[i] == '\n') i++;
+                } else {
+                    i++;
+                }
+            }
+            write_colored_text(input + start, i - start, "\033[38;2;255;123;114m", dest, di, cap);
+            if (i < input_len) {
+                state->context = 0;
+            }
+            continue;
+        }
+
         // 1. Whitespace
         if (isspace((unsigned char)input[i])) {
             ast_append_char(dest, di, cap, input[i++]);
@@ -182,11 +211,7 @@ void highlight_line(const char *input, size_t input_len, const syntax_def_t *def
         if (def->line_comment) {
             size_t lc_len = strlen(def->line_comment);
             if (i + lc_len <= input_len && strncmp(input + i, def->line_comment, lc_len) == 0) {
-                size_t comment_start = i;
-                while (i < input_len && input[i] != '\n' && input[i] != '\r') {
-                    i++;
-                }
-                write_colored_text(input + comment_start, i - comment_start, "\033[38;2;139;148;158m", dest, di, cap);
+                state->context = 7;
                 continue;
             }
         }
@@ -204,16 +229,7 @@ void highlight_line(const char *input, size_t input_len, const syntax_def_t *def
 
         // 4. Preprocessor directive
         if (input[i] == '#' && def->extension && (strcmp(def->extension, ".c") == 0 || strcmp(def->extension, ".cpp") == 0 || strcmp(def->extension, ".h") == 0 || strcmp(def->extension, ".hpp") == 0)) {
-            size_t prep_start = i;
-            while (i < input_len && input[i] != '\n' && input[i] != '\r') {
-                if (input[i] == '\\' && i + 1 < input_len && (input[i+1] == '\n' || input[i+1] == '\r')) {
-                    i += 2;
-                    if (i < input_len && input[i-1] == '\r' && input[i] == '\n') i++;
-                } else {
-                    i++;
-                }
-            }
-            write_colored_text(input + prep_start, i - prep_start, "\033[38;2;255;123;114m", dest, di, cap);
+            state->context = 8;
             continue;
         }
 
@@ -513,6 +529,10 @@ void ast_highlight_display_lines(void *some_state_ptr) {
             highlight_line(raw_line->data, raw_line->len, def, &curr_state, &dummy_dest, &dummy_di, &dummy_cap);
         }
         free(dummy_dest);
+
+        if (curr_state.context == 7 || curr_state.context == 8) {
+            curr_state.context = 0;
+        }
     }
 
     for (size_t i = 0; i < state->num_display_lines; i++) {

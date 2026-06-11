@@ -37,8 +37,8 @@ static void scroll_up(some_state_t *state, size_t n) {
  *  Status bar                                                                 *
  * ─────────────────────────────────────────────────────────────────────────── */
 static void render_status(some_state_t *state) {
-    /* Move to last row, clear it */
-    printf("\033[%d;1H\033[K", state->term_rows);
+    /* Move to last row, clear it, and reset formatting to prevent leaks */
+    printf("\033[0m\033[%d;1H\033[K", state->term_rows);
 
     /* Temporary message takes priority and is displayed in reverse video */
     if (state->status_msg[0]) {
@@ -276,6 +276,7 @@ static void print_line_safe(const char *line, regex_t *re, int has_re, int max_c
     if (hl_active) {
         printf("\033[27m");
     }
+    printf("\033[0m");
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── *
@@ -452,7 +453,7 @@ void some_render(some_state_t *state) {
             printf("\033[90m~\033[0m");
         }
 
-        printf("\033[K\r\n");
+        printf("\033[0m\033[K\r\n");
     }
 
     if (has_re) regfree(&re);
