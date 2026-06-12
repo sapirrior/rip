@@ -56,6 +56,7 @@ const syntax_def_t* get_rb_syntax_def(void);
 const syntax_def_t* get_php_syntax_def(void);
 const syntax_def_t* get_css_syntax_def(void);
 const syntax_def_t* get_html_syntax_def(void);
+const syntax_def_t* get_toml_syntax_def(void);
 
 // Provide helper to append directly to a string buffer
 void ast_append_char(char **dest, size_t *di, size_t *cap, char c);

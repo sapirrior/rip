@@ -415,7 +415,8 @@ static const syntax_def_t* get_syntax_def_from_ext(const char *ext) {
     if (strcmp(ext, ".go") == 0) return get_go_syntax_def();
     if (strcmp(ext, ".sql") == 0) return get_sql_syntax_def();
     if (strcmp(ext, ".sh") == 0 || strcmp(ext, ".bash") == 0 || strcmp(ext, ".zsh") == 0) return get_sh_syntax_def();
-    if (strcmp(ext, ".yaml") == 0 || strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0) return get_yaml_syntax_def();
+    if (strcmp(ext, ".yaml") == 0 || strcmp(ext, ".yml") == 0) return get_yaml_syntax_def();
+    if (strcmp(ext, ".toml") == 0) return get_toml_syntax_def();
     if (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0) return get_md_syntax_def();
     if (strcmp(ext, ".java") == 0) return get_java_syntax_def();
     if (strcmp(ext, ".cs") == 0) return get_cs_syntax_def();

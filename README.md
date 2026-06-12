@@ -13,7 +13,7 @@
 - **Smart Word Wrapping**: Wraps long lines nicely at word boundaries while preserving the starting line's indentation (can be toggled interactively with the `w` key).
 - **Interactive Line Filtering**: Press `&` to isolate matches by regular expression dynamically, with instant reflow rendering.
 - **Auto-Colorization**:
-  - **Code Highlights**: Adds syntax highlighting to C/C++ (`.c`, `.h`, `.cpp`, `.hpp`), Python (`.py`), JavaScript/TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`), Rust (`.rs`), Go (`.go`), SQL (`.sql`), Shell/Bash (`.sh`, `.bash`, `.zsh`), YAML/TOML (`.yaml`, `.yml`, `.toml`), Markdown (`.md`, `.markdown`), Java (`.java`), C# (`.cs`), Ruby (`.rb`), PHP (`.php`), CSS (`.css`), and HTML/XML (`.html`, `.htm`, `.xml`, `.xhtml`).
+  - **Code Highlights**: Adds syntax highlighting to C/C++ (`.c`, `.h`, `.cpp`, `.hpp`), Python (`.py`), JavaScript/TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`), Rust (`.rs`), Go (`.go`), SQL (`.sql`), Shell/Bash (`.sh`, `.bash`, `.zsh`), YAML (`.yaml`, `.yml`), TOML (`.toml`), Markdown (`.md`, `.markdown`), Java (`.java`), C# (`.cs`), Ruby (`.rb`), PHP (`.php`), CSS (`.css`), and HTML/XML (`.html`, `.htm`, `.xml`, `.xhtml`).
   - **Log Level Colors**: Automatically highlights logs containing `INFO`, `WARN`, `DEBUG`, or `ERROR` in corresponding colors.
 - **Search Highlighting**: Interactive regex-based search (`/` / `?`) with high-contrast background highlights.
 - **Nested Help Pager**: Press `Ctrl+H` to access the interactive, beautifully colorized help menu loaded directly as scrollable pager content, supporting scroll, wraps, and search.
